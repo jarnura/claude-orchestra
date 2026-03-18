@@ -1,0 +1,40 @@
+{
+  "name": "Feature Implementation Pipeline",
+  "stages": [
+    {
+      "name": "Plan",
+      "tasks": [
+        {
+          "file": "tasks-plan.json",
+          "max_parallel": 1
+        }
+      ],
+      "pass_outputs_to_next": true
+    },
+    {
+      "name": "Implement",
+      "tasks": [
+        {
+          "file": "tasks-implement.json",
+          "max_parallel": 5
+        }
+      ],
+      "pass_outputs_to_next": true
+    },
+    {
+      "name": "Review",
+      "tasks": [
+        {
+          "file": "tasks-code-review.json",
+          "max_parallel": 3
+        },
+        {
+          "file": "tasks-security.json",
+          "max_parallel": 2
+        }
+      ],
+      "pass_outputs_to_next": false
+    }
+  ],
+  "aggregate": true
+}

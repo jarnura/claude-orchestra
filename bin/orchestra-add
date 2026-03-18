@@ -1,0 +1,81 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Add a single task to a tasks JSON file (with ECC support)
+# Usage: orchestra-add <id> <name> <workdir> <prompt> [options]
+
+TASKS_FILE="tasks.json"
+MODEL="opus"
+EFFORT="high"
+AGENTS=""
+SKILLS=""
+HOOKS=""
+
+# Parse flags
+args=()
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --file) TASKS_FILE="$2"; shift 2 ;;
+        --model) MODEL="$2"; shift 2 ;;
+        --effort) EFFORT="$2"; shift 2 ;;
+        --agent) AGENTS="$2"; shift 2 ;;
+        --skill) SKILLS="$2"; shift 2 ;;
+        --hooks) HOOKS="$2"; shift 2 ;;
+        *) args+=("$1"); shift ;;
+    esac
+done
+set -- "${args[@]}"
+
+if [[ $# -lt 4 ]]; then
+    echo "Usage: orchestra-add <id> <name> <workdir> <prompt> [options]"
+    echo ""
+    echo "Options:"
+    echo "  --file FILE      Tasks file (default: tasks.json)"
+    echo "  --model MODEL    Model: opus, sonnet, haiku (default: opus)"
+    echo "  --effort LEVEL   Effort: high, medium, low (default: high)"
+    echo "  --agent AGENTS   Comma-separated agent names"
+    echo "  --skill SKILLS   Comma-separated skill names"
+    echo "  --hooks PROFILE  Hook profile: strict, standard, minimal"
+    echo ""
+    echo "Example:"
+    echo "  orchestra-add sec-audit 'Security Audit' /path/to/repo 'Audit for vulnerabilities' --agent security-reviewer"
+    exit 1
+fi
+
+ID="$1"
+NAME="$2"
+WORKDIR="$3"
+PROMPT="$4"
+
+if [[ ! -f "$TASKS_FILE" ]]; then
+    echo '{"tasks":[]}' > "$TASKS_FILE"
+fi
+
+tmp=$(mktemp)
+jq --arg id "$ID" \
+   --arg name "$NAME" \
+   --arg workdir "$WORKDIR" \
+   --arg prompt "$PROMPT" \
+   --arg model "$MODEL" \
+   --arg effort "$EFFORT" \
+   --arg agents "$AGENTS" \
+   --arg skills "$SKILLS" \
+   --arg hooks "$HOOKS" \
+   '.tasks += [{
+       id: $id,
+       name: $name,
+       prompt: $prompt,
+       workdir: $workdir,
+       model: $model,
+       effort: $effort,
+       status: "pending",
+       agents: (if $agents == "" then null else $agents end),
+       skills: (if $skills == "" then null else $skills end),
+       hooks: (if $hooks == "" then null else $hooks end)
+   }]' \
+   "$TASKS_FILE" > "$tmp" && mv "$tmp" "$TASKS_FILE"
+
+echo "Added task: $NAME ($ID)"
+[[ -n "$AGENTS" ]] && echo "  Agents: $AGENTS"
+[[ -n "$SKILLS" ]] && echo "  Skills: $SKILLS"
+[[ -n "$HOOKS" ]] && echo "  Hooks: $HOOKS"

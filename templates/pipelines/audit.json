@@ -1,0 +1,24 @@
+{
+  "name": "Comprehensive Audit Pipeline",
+  "stages": [
+    {
+      "name": "Audit (Parallel)",
+      "tasks": [
+        {
+          "file": "tasks-security-audit.json",
+          "max_parallel": 5
+        },
+        {
+          "file": "tasks-code-quality.json",
+          "max_parallel": 5
+        },
+        {
+          "file": "tasks-architecture.json",
+          "max_parallel": 3
+        }
+      ],
+      "pass_outputs_to_next": false
+    }
+  ],
+  "aggregate": true
+}

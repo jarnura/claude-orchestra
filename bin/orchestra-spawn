@@ -1,0 +1,151 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# orchestra-spawn — Quick single-task launcher with ECC support
+# Creates a temporary task file and runs orchestra on it
+#
+# Usage:
+#   orchestra-spawn "prompt text" [--workdir DIR] [--model MODEL] [--agent AGENTS] [--skill SKILLS]
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+ORCHESTRA_DIR="$(dirname "$SCRIPT_DIR")"
+LIB_DIR="$ORCHESTRA_DIR/lib"
+
+# Source ECC adapter for --list-agents/--list-skills
+source "$LIB_DIR/config.sh"
+load_config
+
+# Defaults
+WORKDIR="."
+MODEL="opus"
+EFFORT="high"
+NAME=""
+ALLOWED_TOOLS="Read Grep Glob Bash Edit Write Agent"
+PROMPT=""
+AGENTS=""
+SKILLS=""
+HOOKS=""
+APPEND_PROMPT=""
+
+# Parse args
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --workdir) WORKDIR="$2"; shift 2 ;;
+        --model) MODEL="$2"; shift 2 ;;
+        --effort) EFFORT="$2"; shift 2 ;;
+        --name) NAME="$2"; shift 2 ;;
+        --tools) ALLOWED_TOOLS="$2"; shift 2 ;;
+        --readonly) ALLOWED_TOOLS="Read Grep Glob Agent"; shift ;;
+        --agent) AGENTS="$2"; shift 2 ;;
+        --skill) SKILLS="$2"; shift 2 ;;
+        --hooks) HOOKS="$2"; shift 2 ;;
+        --append) APPEND_PROMPT="$2"; shift 2 ;;
+        --list-agents)
+            source "$LIB_DIR/ecc-adapter.sh"
+            ecc_init 2>/dev/null
+            if ecc_available; then
+                echo "Available agents:"
+                ecc_list_agents | while read -r a; do echo "  $a"; done
+            else
+                echo "ECC not detected. No agents available."
+            fi
+            exit 0
+            ;;
+        --list-skills)
+            source "$LIB_DIR/ecc-adapter.sh"
+            ecc_init 2>/dev/null
+            if ecc_available; then
+                echo "Available skills:"
+                ecc_list_skills | while read -r s; do echo "  $s"; done
+            else
+                echo "ECC not detected. No skills available."
+            fi
+            exit 0
+            ;;
+        --help|-h)
+            echo "Usage: orchestra-spawn \"prompt\" [options]"
+            echo ""
+            echo "Options:"
+            echo "  --workdir DIR      Working directory (default: .)"
+            echo "  --model MODEL      Model: opus, sonnet, haiku (default: opus)"
+            echo "  --effort LEVEL     Effort: high, medium, low (default: high)"
+            echo "  --name NAME        Task name (auto-generated if omitted)"
+            echo "  --tools TOOLS      Allowed tools (default: Read Grep Glob Bash Edit Write Agent)"
+            echo "  --readonly         Shortcut for --tools 'Read Grep Glob Agent'"
+            echo "  --agent AGENTS     Comma-separated ECC agent names (e.g., security-reviewer,code-reviewer)"
+            echo "  --skill SKILLS     Comma-separated ECC skill names (e.g., springboot-patterns)"
+            echo "  --hooks PROFILE    Hook profile: strict, standard, minimal"
+            echo "  --append TEXT      Extra text for appendSystemPrompt"
+            echo "  --list-agents      List available ECC agents"
+            echo "  --list-skills      List available ECC skills"
+            echo ""
+            echo "Examples:"
+            echo "  orchestra-spawn 'Audit auth module' --agent security-reviewer --readonly"
+            echo "  orchestra-spawn 'Fix N+1 queries' --agent tdd-guide --skill springboot-patterns"
+            echo "  orchestra-spawn 'Review PR changes' --agent code-reviewer --hooks strict"
+            exit 0
+            ;;
+        *)
+            if [[ -z "$PROMPT" ]]; then
+                PROMPT="$1"
+            else
+                PROMPT="$PROMPT $1"
+            fi
+            shift
+            ;;
+    esac
+done
+
+if [[ -z "$PROMPT" ]]; then
+    echo "Error: prompt required"
+    echo "Usage: orchestra-spawn \"prompt\" [--workdir DIR] [--agent AGENTS] [--skill SKILLS]"
+    exit 1
+fi
+
+# Generate name from prompt if not provided
+if [[ -z "$NAME" ]]; then
+    NAME=$(echo "$PROMPT" | head -c 50 | tr ' ' '-' | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9-]//g')
+fi
+
+ID="spawn-${NAME}-$(date +%s)"
+TASKS_FILE="/tmp/orchestra-${ID}.json"
+
+# Create task JSON
+jq -n \
+    --arg id "$ID" \
+    --arg name "$NAME" \
+    --arg workdir "$WORKDIR" \
+    --arg prompt "$PROMPT" \
+    --arg model "$MODEL" \
+    --arg effort "$EFFORT" \
+    --arg tools "$ALLOWED_TOOLS" \
+    --arg append "$APPEND_PROMPT" \
+    --arg agents "$AGENTS" \
+    --arg skills "$SKILLS" \
+    --arg hooks "$HOOKS" \
+    '{tasks: [{
+        id: $id,
+        name: $name,
+        prompt: $prompt,
+        workdir: $workdir,
+        model: $model,
+        effort: $effort,
+        status: "pending",
+        allowedTools: $tools,
+        appendSystemPrompt: (if $append == "" then null else $append end),
+        agents: (if $agents == "" then null else $agents end),
+        skills: (if $skills == "" then null else $skills end),
+        hooks: (if $hooks == "" then null else $hooks end)
+    }]}' > "$TASKS_FILE"
+
+echo "Task file: $TASKS_FILE"
+echo "Starting orchestra..."
+
+# Run orchestra in background
+"$SCRIPT_DIR/orchestra" "$TASKS_FILE" &
+ORCHESTRA_PID=$!
+
+echo "Orchestra PID: $ORCHESTRA_PID"
+echo ""
+echo "Monitor with: orchestra-dashboard $TASKS_FILE"
+echo "Or check:     jq '.tasks[] | {name, status}' $TASKS_FILE"

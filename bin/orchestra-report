@@ -1,0 +1,158 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# orchestra-report — Aggregate pipeline outputs into a summary report
+# Usage: orchestra-report <log-dir> [--format md|json]
+
+if [[ $# -lt 1 ]]; then
+    echo "Usage: orchestra-report <log-dir> [--format md|json]"
+    echo ""
+    echo "Reads all .output.md files from a log directory and produces"
+    echo "a structured summary report with task metadata."
+    echo ""
+    echo "Example:"
+    echo "  orchestra-report logs/20260317-143000"
+    echo "  orchestra-report logs/20260317-143000 --format json"
+    exit 1
+fi
+
+LOG_DIR="$1"
+FORMAT="md"
+
+shift
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --format) FORMAT="$2"; shift 2 ;;
+        *) shift ;;
+    esac
+done
+
+if [[ ! -d "$LOG_DIR" ]]; then
+    echo "Log directory not found: $LOG_DIR"
+    exit 1
+fi
+
+STATE_FILE="$LOG_DIR/state.json"
+
+REPORT_LOG_DIR="$LOG_DIR" REPORT_FORMAT="$FORMAT" python3 -c "
+import json, os, sys
+from pathlib import Path
+from datetime import datetime
+
+log_dir = Path(os.environ['REPORT_LOG_DIR'])
+format_type = os.environ.get('REPORT_FORMAT', 'md')
+state_file = log_dir / 'state.json'
+
+# Load state
+state = {}
+if state_file.exists():
+    try:
+        state = json.loads(state_file.read_text())
+    except json.JSONDecodeError:
+        pass
+
+tasks = state.get('tasks', [])
+ecc_enabled = state.get('ecc_enabled', False)
+started_at = state.get('started_at', 0)
+
+if format_type == 'json':
+    # JSON report
+    report = {
+        'log_dir': str(log_dir),
+        'ecc_enabled': ecc_enabled,
+        'started_at': started_at,
+        'summary': {
+            'total': len(tasks),
+            'done': len([t for t in tasks if t['status'] == 'done']),
+            'failed': len([t for t in tasks if t['status'] == 'failed']),
+        },
+        'tasks': []
+    }
+
+    for task in tasks:
+        tid = task['id']
+        output_file = log_dir / f'{tid}.output.md'
+        output_excerpt = ''
+        output_size = 0
+        if output_file.exists():
+            content = output_file.read_text()
+            output_size = len(content)
+            output_excerpt = content[:3000]
+
+        report['tasks'].append({
+            'id': tid,
+            'name': task.get('name', tid),
+            'status': task['status'],
+            'model': task.get('model', 'opus'),
+            'agents': task.get('agents'),
+            'skills': task.get('skills'),
+            'output_size': output_size,
+            'output_excerpt': output_excerpt,
+        })
+
+    print(json.dumps(report, indent=2))
+
+else:
+    # Markdown report
+    run_name = log_dir.name
+    done = [t for t in tasks if t['status'] == 'done']
+    failed = [t for t in tasks if t['status'] == 'failed']
+
+    print(f'# Orchestra Report: {run_name}')
+    print()
+    if started_at:
+        dt = datetime.fromtimestamp(started_at)
+        print(f'**Started**: {dt.strftime(\"%Y-%m-%d %H:%M:%S\")}')
+    print(f'**ECC**: {\"enabled\" if ecc_enabled else \"standalone\"}')
+    print(f'**Results**: {len(done)} completed, {len(failed)} failed, {len(tasks)} total')
+    print()
+
+    # Summary table
+    print('## Tasks')
+    print()
+    print('| Status | Task | Model | Agents | Output |')
+    print('|--------|------|-------|--------|--------|')
+
+    for task in tasks:
+        tid = task['id']
+        status_icon = '\u2713' if task['status'] == 'done' else '\u2717' if task['status'] == 'failed' else '\u25cb'
+        agents = task.get('agents', '') or '\u2014'
+        output_file = log_dir / f'{tid}.output.md'
+        output_size = ''
+        if output_file.exists():
+            sz = output_file.stat().st_size
+            if sz < 1024:
+                output_size = f'{sz}B'
+            elif sz < 1024 * 1024:
+                output_size = f'{sz / 1024:.1f}K'
+            else:
+                output_size = f'{sz / (1024 * 1024):.1f}M'
+
+        print(f'| {status_icon} {task[\"status\"]} | {task.get(\"name\", tid)} | {task.get(\"model\", \"opus\")} | {agents} | {output_size} |')
+
+    print()
+
+    # Detail sections
+    print('## Details')
+    print()
+
+    for task in tasks:
+        tid = task['id']
+        print(f'### {task.get(\"name\", tid)}')
+        print(f'- **Status**: {task[\"status\"]}')
+        print(f'- **Model**: {task.get(\"model\", \"opus\")}')
+        if task.get('agents'):
+            print(f'- **Agents**: {task[\"agents\"]}')
+        if task.get('skills'):
+            print(f'- **Skills**: {task[\"skills\"]}')
+
+        output_file = log_dir / f'{tid}.output.md'
+        if output_file.exists():
+            content = output_file.read_text()
+            excerpt = content[:3000]
+            if len(content) > 3000:
+                excerpt += '\n\n... (truncated, full output in logs)'
+            print()
+            print(excerpt)
+        print()
+"

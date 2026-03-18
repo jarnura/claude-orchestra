@@ -1,0 +1,427 @@
+#!/usr/bin/env python3
+"""
+orchestra-serve — Web log viewer for claude-orchestra runs.
+
+Usage:
+    orchestra-serve [--logs-dir PATH] [--port PORT] [--host HOST]
+
+Opens http://localhost:7890 with a dark-themed web viewer for browsing
+orchestrator runs, task outputs, and execution timelines.
+"""
+
+import argparse
+import json
+import os
+import re
+import sys
+from datetime import datetime, timezone
+from http.server import BaseHTTPRequestHandler, HTTPServer
+from pathlib import Path
+from urllib.parse import parse_qs, urlparse
+
+SCRIPT_DIR = Path(__file__).resolve().parent
+ORCHESTRA_DIR = SCRIPT_DIR.parent
+VIEWER_DIR = ORCHESTRA_DIR / "viewer"
+
+RUN_ID_RE = re.compile(r"^\d{8}-\d{6}$")
+TASK_ID_RE = re.compile(r"^[a-z0-9][a-z0-9_-]*$")
+
+
+def _summarize_tool(tool: str, inp: dict) -> str:
+    """One-line summary of a tool call (ported from orchestra-dashboard)."""
+    if tool == "Read":
+        fp = inp.get("file_path", "")
+        return f"Reading {Path(fp).name}" if fp else "Reading..."
+    elif tool == "Glob":
+        return f"Searching {inp.get('pattern', '...')}"
+    elif tool == "Grep":
+        pat = inp.get("pattern", "")
+        return f"Grep: {pat[:40]}" if pat else "Searching..."
+    elif tool == "Edit":
+        fp = inp.get("file_path", "")
+        return f"Editing {Path(fp).name}" if fp else "Editing..."
+    elif tool == "Write":
+        fp = inp.get("file_path", "")
+        return f"Writing {Path(fp).name}" if fp else "Writing..."
+    elif tool == "Bash":
+        cmd = inp.get("command", "")
+        return f"$ {cmd[:50]}" if cmd else "Running..."
+    elif tool in ("Agent", "Task"):
+        desc = inp.get("description", inp.get("prompt", "")[:40])
+        return f"Agent: {desc[:40]}" if desc else "Agent..."
+    elif tool == "WebFetch":
+        url = inp.get("url", "")
+        return f"Fetch: {url[:50]}" if url else "Fetching..."
+    elif tool == "TodoWrite":
+        return "Updating todo list"
+    return tool
+
+
+def _format_bytes(n: int) -> str:
+    if n < 1024:
+        return f"{n}B"
+    elif n < 1024 * 1024:
+        return f"{n / 1024:.1f}K"
+    else:
+        return f"{n / (1024 * 1024):.1f}M"
+
+
+def _parse_stream(stream_path: Path) -> dict:
+    """Single-pass JSONL parse into structured event summary."""
+    events = []
+    meta = {}
+    tool_results = {}
+
+    lines = []
+    with open(stream_path, "r", errors="replace") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                lines.append(json.loads(line))
+            except json.JSONDecodeError:
+                continue
+
+    # First pass: collect tool results
+    for ev in lines:
+        if ev.get("type") == "user":
+            msg = ev.get("message", {})
+            content = msg.get("content", [])
+            if isinstance(content, list):
+                for c in content:
+                    if isinstance(c, dict) and c.get("type") == "tool_result":
+                        raw = c.get("content", "")
+                        if isinstance(raw, list):
+                            raw = " ".join(
+                                item.get("text", "")
+                                for item in raw
+                                if isinstance(item, dict)
+                            )
+                        tool_results[c.get("tool_use_id", "")] = str(raw)
+
+    # Second pass: build event list
+    seq = 0
+    for ev in lines:
+        t = ev.get("type")
+
+        if t == "system":
+            sub = ev.get("subtype")
+            if sub == "init":
+                events.append(
+                    {
+                        "seq": seq,
+                        "type": "init",
+                        "cwd": ev.get("cwd"),
+                        "model": ev.get("model"),
+                        "tool_count": len(ev.get("tools", [])),
+                        "session_id": ev.get("session_id"),
+                    }
+                )
+                seq += 1
+            elif sub == "task_started":
+                events.append(
+                    {
+                        "seq": seq,
+                        "type": "task_started",
+                        "description": ev.get("description"),
+                    }
+                )
+                seq += 1
+            elif sub == "task_progress":
+                events.append(
+                    {
+                        "seq": seq,
+                        "type": "progress",
+                        "description": ev.get("description", ""),
+                        "tool_name": ev.get("last_tool_name"),
+                        "tool_uses_so_far": ev.get("usage", {}).get("tool_uses"),
+                        "duration_ms": ev.get("usage", {}).get("duration_ms"),
+                    }
+                )
+                seq += 1
+            elif sub == "task_notification":
+                events.append(
+                    {
+                        "seq": seq,
+                        "type": "task_notification",
+                        "status": ev.get("status"),
+                        "summary": ev.get("summary"),
+                    }
+                )
+                seq += 1
+
+        elif t == "assistant":
+            for c in ev.get("message", {}).get("content", []):
+                ct = c.get("type")
+                if ct == "thinking":
+                    events.append(
+                        {"seq": seq, "type": "thinking", "text": c.get("thinking", "")}
+                    )
+                    seq += 1
+                elif ct == "tool_use":
+                    tid = c.get("id", "")
+                    raw_result = tool_results.get(tid, "")
+                    events.append(
+                        {
+                            "seq": seq,
+                            "type": "tool_use",
+                            "name": c.get("name"),
+                            "input": c.get("input", {}),
+                            "summary": _summarize_tool(
+                                c.get("name", ""), c.get("input", {})
+                            ),
+                            "result": raw_result[:500],
+                            "result_truncated": len(raw_result) > 500,
+                        }
+                    )
+                    seq += 1
+                elif ct == "text":
+                    events.append(
+                        {"seq": seq, "type": "text", "text": c.get("text", "")}
+                    )
+                    seq += 1
+
+        elif t == "result":
+            usage = ev.get("usage", {})
+            meta = {
+                "duration_ms": ev.get("duration_ms"),
+                "total_cost_usd": ev.get("total_cost_usd"),
+                "num_turns": ev.get("num_turns"),
+                "stop_reason": ev.get("stop_reason"),
+                "input_tokens": usage.get("input_tokens", 0),
+                "output_tokens": usage.get("output_tokens", 0),
+            }
+
+        elif t == "rate_limit_event":
+            events.append({"seq": seq, "type": "rate_limit"})
+            seq += 1
+
+    return {"meta": meta, "events": events}
+
+
+class OrchestraHandler(BaseHTTPRequestHandler):
+    logs_dir: Path = Path(".")
+
+    def do_GET(self):
+        parsed = urlparse(self.path)
+        path = parsed.path.rstrip("/")
+        qs = parse_qs(parsed.query, keep_blank_values=True)
+
+        if path in ("", "/"):
+            self._serve_file(VIEWER_DIR / "index.html", "text/html")
+        elif path == "/api/runs":
+            self._api_runs()
+        elif m := re.match(r"^/api/runs/([^/]+)$", path):
+            self._api_run_detail(m.group(1))
+        elif m := re.match(r"^/api/runs/([^/]+)/([^/]+)/output$", path):
+            self._api_task_output(m.group(1), m.group(2))
+        elif m := re.match(r"^/api/runs/([^/]+)/([^/]+)/stream$", path):
+            summarize = "summarize" in qs
+            self._api_task_stream(m.group(1), m.group(2), summarize)
+        else:
+            self._not_found()
+
+    def _validate_ids(self, run_id, task_id=None):
+        if not RUN_ID_RE.match(run_id):
+            self._error(400, "Invalid run ID format")
+            return False
+        if task_id and not TASK_ID_RE.match(task_id):
+            self._error(400, "Invalid task ID format")
+            return False
+        return True
+
+    def _api_runs(self):
+        runs = []
+        if not self.logs_dir.is_dir():
+            self._json({"runs": []})
+            return
+        for run_dir in sorted(self.logs_dir.iterdir(), reverse=True):
+            if not run_dir.is_dir():
+                continue
+            state_file = run_dir / "state.json"
+            if not state_file.exists():
+                continue
+            try:
+                state = json.loads(state_file.read_text())
+            except Exception:
+                continue
+            tasks = state.get("tasks", [])
+            counts = {
+                "total": len(tasks),
+                "done": 0,
+                "running": 0,
+                "pending": 0,
+                "failed": 0,
+            }
+            for t in tasks:
+                st = t.get("status", "pending")
+                if st in counts:
+                    counts[st] += 1
+            total_output = 0
+            for t in tasks:
+                out_f = run_dir / f"{t['id']}.output.md"
+                if out_f.exists():
+                    total_output += out_f.stat().st_size
+            ts = state.get("started_at", 0)
+            try:
+                iso = datetime.fromtimestamp(int(ts), tz=timezone.utc).isoformat()
+            except Exception:
+                iso = None
+            runs.append(
+                {
+                    "id": run_dir.name,
+                    "started_at": ts,
+                    "started_at_iso": iso,
+                    "ecc_enabled": state.get("ecc_enabled", False),
+                    "task_counts": counts,
+                    "total_output_bytes": total_output,
+                }
+            )
+        self._json({"runs": runs})
+
+    def _api_run_detail(self, run_id):
+        if not self._validate_ids(run_id):
+            return
+        run_dir = self.logs_dir / run_id
+        state_file = run_dir / "state.json"
+        if not state_file.exists():
+            self._not_found()
+            return
+        state = json.loads(state_file.read_text())
+        tasks = []
+        for t in state.get("tasks", []):
+            tid = t["id"]
+            output_f = run_dir / f"{tid}.output.md"
+            stream_f = run_dir / f"{tid}.stream.jsonl"
+            tasks.append(
+                {
+                    **t,
+                    "output_bytes": output_f.stat().st_size
+                    if output_f.exists()
+                    else 0,
+                    "stream_bytes": stream_f.stat().st_size
+                    if stream_f.exists()
+                    else 0,
+                    "has_output": output_f.exists() and output_f.stat().st_size > 0,
+                    "has_stream": stream_f.exists() and stream_f.stat().st_size > 0,
+                }
+            )
+        ts = state.get("started_at", 0)
+        try:
+            iso = datetime.fromtimestamp(int(ts), tz=timezone.utc).isoformat()
+        except Exception:
+            iso = None
+        self._json(
+            {
+                "id": run_id,
+                "started_at": ts,
+                "started_at_iso": iso,
+                "ecc_enabled": state.get("ecc_enabled", False),
+                "tasks": tasks,
+            }
+        )
+
+    def _api_task_output(self, run_id, task_id):
+        if not self._validate_ids(run_id, task_id):
+            return
+        output_f = self.logs_dir / run_id / f"{task_id}.output.md"
+        if not output_f.exists():
+            self._not_found()
+            return
+        self._serve_file(output_f, "text/plain; charset=utf-8")
+
+    def _api_task_stream(self, run_id, task_id, summarize):
+        if not self._validate_ids(run_id, task_id):
+            return
+        stream_f = self.logs_dir / run_id / f"{task_id}.stream.jsonl"
+        if not stream_f.exists():
+            self._not_found()
+            return
+        if summarize:
+            summary = _parse_stream(stream_f)
+            self._json(summary)
+        else:
+            self._serve_file(stream_f, "application/x-ndjson")
+
+    def _json(self, data):
+        body = json.dumps(data, default=str).encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _serve_file(self, file_path: Path, content_type: str):
+        if not file_path.exists():
+            self._not_found()
+            return
+        data = file_path.read_bytes()
+        self.send_response(200)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(data)))
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.end_headers()
+        self.wfile.write(data)
+
+    def _not_found(self):
+        body = json.dumps({"error": "Not found"}).encode()
+        self.send_response(404)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _error(self, code, msg):
+        body = json.dumps({"error": msg}).encode()
+        self.send_response(code)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def log_message(self, fmt, *args):
+        """Suppress default access logs."""
+        pass
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="claude-orchestra web log viewer",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="Example:\n  orchestra-serve\n  orchestra-serve --port 8080\n  orchestra-serve --logs-dir /path/to/logs",
+    )
+    parser.add_argument("--logs-dir", default=None, help="Path to logs directory")
+    parser.add_argument("--port", type=int, default=7890, help="Port (default: 7890)")
+    parser.add_argument(
+        "--host", default="127.0.0.1", help="Host (default: 127.0.0.1)"
+    )
+    args = parser.parse_args()
+
+    if args.logs_dir:
+        logs_dir = Path(args.logs_dir)
+    else:
+        candidates = [
+            ORCHESTRA_DIR / "logs",
+            Path.cwd() / "logs",
+        ]
+        logs_dir = next((p for p in candidates if p.is_dir()), candidates[0])
+
+    OrchestraHandler.logs_dir = logs_dir
+
+    server = HTTPServer((args.host, args.port), OrchestraHandler)
+    url = f"http://{args.host}:{args.port}"
+    print(f"\033[35mclaude-orchestra viewer\033[0m")
+    print(f"  URL:      \033[34m{url}\033[0m")
+    print(f"  Logs dir: \033[34m{logs_dir}\033[0m")
+    print(f"  Ctrl+C to stop")
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        print("\nShutting down.")
+        server.server_close()
+
+
+if __name__ == "__main__":
+    main()

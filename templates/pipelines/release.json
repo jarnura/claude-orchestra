@@ -1,0 +1,40 @@
+{
+  "name": "Release Readiness Pipeline",
+  "stages": [
+    {
+      "name": "Test",
+      "tasks": [
+        {
+          "file": "tasks-test-suite.json",
+          "max_parallel": 10
+        }
+      ],
+      "pass_outputs_to_next": true
+    },
+    {
+      "name": "Security",
+      "tasks": [
+        {
+          "file": "tasks-security-scan.json",
+          "max_parallel": 5
+        }
+      ],
+      "pass_outputs_to_next": true
+    },
+    {
+      "name": "Documentation",
+      "tasks": [
+        {
+          "file": "tasks-docs.json",
+          "max_parallel": 3
+        },
+        {
+          "file": "tasks-changelog.json",
+          "max_parallel": 1
+        }
+      ],
+      "pass_outputs_to_next": false
+    }
+  ],
+  "aggregate": true
+}

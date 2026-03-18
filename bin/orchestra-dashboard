@@ -1,0 +1,396 @@
+#!/usr/bin/env python3
+"""
+claude-orchestra TUI dashboard — real-time task monitoring with ECC metadata.
+
+Usage:
+    orchestra-dashboard <tasks.json>
+    orchestra-dashboard <logs/run-dir/>
+
+Requires: pip install rich
+"""
+
+import json
+import os
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+try:
+    from rich.console import Console, Group
+    from rich.live import Live
+    from rich.table import Table
+    from rich.panel import Panel
+    from rich.text import Text
+except ImportError:
+    print("Missing dependency: pip install rich")
+    sys.exit(1)
+
+SPINNERS = "\u280b\u2819\u2839\u2838\u283c\u2834\u2826\u2827\u2807\u280f"
+_tick = 0
+
+
+def find_log_dir(tasks_file: Path) -> Path | None:
+    """Find the most recent log directory that has a state.json."""
+    for base in [tasks_file.parent, Path(".")]:
+        log_dirs = sorted(
+            base.glob("logs/*/state.json"),
+            key=lambda x: x.stat().st_mtime,
+            reverse=True,
+        )
+        if log_dirs:
+            return log_dirs[0].parent
+    return None
+
+
+def find_files(arg: str):
+    """Resolve tasks file and optional state file from CLI arg."""
+    p = Path(arg)
+    if p.is_dir():
+        state_file = p / "state.json"
+        tasks_file = None
+        for candidate in sorted(p.parent.glob("tasks*.json")):
+            tasks_file = candidate
+            break
+        return tasks_file, state_file if state_file.exists() else None
+    elif p.is_file() and p.suffix == ".json":
+        log_dir = find_log_dir(p)
+        state_file = (log_dir / "state.json") if log_dir else None
+        return p, state_file
+    else:
+        print(f"Not found: {arg}")
+        sys.exit(1)
+
+
+def load_tasks(tasks_file: Path) -> dict:
+    try:
+        return json.loads(tasks_file.read_text())
+    except (json.JSONDecodeError, FileNotFoundError):
+        return {"tasks": []}
+
+
+def load_state(state_file: Path | None) -> dict | None:
+    if state_file and state_file.exists():
+        try:
+            return json.loads(state_file.read_text())
+        except (json.JSONDecodeError, FileNotFoundError):
+            return None
+    return None
+
+
+def format_duration(seconds: int) -> str:
+    if seconds < 60:
+        return f"{seconds}s"
+    m, s = divmod(seconds, 60)
+    if m < 60:
+        return f"{m}m {s:02d}s"
+    h, m = divmod(m, 60)
+    return f"{h}h {m:02d}m"
+
+
+def format_size(nbytes: int) -> str:
+    if nbytes < 1024:
+        return f"{nbytes}B"
+    elif nbytes < 1024 * 1024:
+        return f"{nbytes / 1024:.1f}K"
+    else:
+        return f"{nbytes / (1024 * 1024):.1f}M"
+
+
+def get_last_activity(stream_file: Path) -> str:
+    """Get the last meaningful activity from the stream JSONL."""
+    if not stream_file.exists():
+        return ""
+    try:
+        size = stream_file.stat().st_size
+        with open(stream_file, "rb") as f:
+            if size > 8192:
+                f.seek(size - 8192)
+            data = f.read().decode("utf-8", errors="replace")
+
+        last_tool = ""
+        for line in reversed(data.strip().split("\n")):
+            if not line.strip():
+                continue
+            try:
+                ev = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+
+            if ev.get("type") == "assistant":
+                for block in ev.get("message", {}).get("content", []):
+                    if block.get("type") == "tool_use" and not last_tool:
+                        tool = block.get("name", "")
+                        inp = block.get("input", {})
+                        last_tool = _summarize_tool(tool, inp)
+
+            if last_tool:
+                break
+
+        return last_tool or ""
+    except Exception:
+        return ""
+
+
+def _summarize_tool(tool: str, inp: dict) -> str:
+    """One-line summary of a tool call."""
+    if tool == "Read":
+        fp = inp.get("file_path", "")
+        return f"Reading {Path(fp).name}" if fp else "Reading..."
+    elif tool == "Glob":
+        return f"Searching {inp.get('pattern', '...')}"
+    elif tool == "Grep":
+        pat = inp.get("pattern", "")
+        return f"Grep: {pat[:30]}" if pat else "Searching..."
+    elif tool == "Edit":
+        fp = inp.get("file_path", "")
+        return f"Editing {Path(fp).name}" if fp else "Editing..."
+    elif tool == "Write":
+        fp = inp.get("file_path", "")
+        return f"Writing {Path(fp).name}" if fp else "Writing..."
+    elif tool == "Bash":
+        cmd = inp.get("command", "")
+        return f"$ {cmd[:35]}" if cmd else "Running..."
+    elif tool == "Agent":
+        desc = inp.get("description", "")
+        return f"Agent: {desc[:30]}" if desc else "Agent..."
+    else:
+        return tool
+
+
+def count_tool_calls(stream_file: Path) -> int:
+    """Count tool_use blocks in stream file."""
+    if not stream_file.exists():
+        return 0
+    try:
+        result = subprocess.run(
+            ["grep", "-c", '"tool_use"', str(stream_file)],
+            capture_output=True, text=True, timeout=2,
+        )
+        return int(result.stdout.strip()) if result.returncode == 0 else 0
+    except Exception:
+        return 0
+
+
+def get_task_ecc_info(task: dict, state: dict | None) -> tuple[str, str]:
+    """Get agents and skills info from state.json (preferred) or tasks.json."""
+    # Try state.json first (has resolved ECC metadata)
+    if state:
+        for st in state.get("tasks", []):
+            if st.get("id") == task.get("id"):
+                agents = st.get("agents") or ""
+                skills = st.get("skills") or ""
+                return agents, skills
+
+    # Fallback to tasks.json
+    agents = task.get("agents") or ""
+    skills = task.get("skills") or ""
+    return agents, skills
+
+
+def build_display(tasks_file: Path, state_file: Path | None, start_time: float) -> Panel:
+    global _tick
+    _tick += 1
+    now = time.time()
+    data = load_tasks(tasks_file)
+    state = load_state(state_file)
+    tasks = data.get("tasks", [])
+
+    log_dir = None
+    if state:
+        log_dir = Path(state.get("log_dir", ""))
+        if not log_dir.exists():
+            log_dir = tasks_file.parent / state.get("log_dir", "")
+        if not log_dir.exists():
+            log_dir = None
+
+    if not log_dir:
+        log_dir = find_log_dir(tasks_file)
+
+    counts = {"pending": 0, "running": 0, "done": 0, "failed": 0}
+    for t in tasks:
+        s = t.get("status", "pending")
+        counts[s] = counts.get(s, 0) + 1
+    total = len(tasks)
+
+    orch_start = state.get("started_at", start_time) if state else start_time
+    elapsed = int(now - orch_start)
+
+    spinner = SPINNERS[_tick % len(SPINNERS)]
+
+    # ECC status
+    ecc_enabled = state.get("ecc_enabled", False) if state else False
+
+    # Header
+    header = Text()
+    header.append(f"Tasks: ", style="bold")
+    header.append(f"{counts['done']}/{total} done", style="green")
+    header.append(f"  {counts['running']} running", style="yellow")
+    header.append(f"  {counts['pending']} pending", style="dim")
+    if counts["failed"]:
+        header.append(f"  {counts['failed']} failed", style="red bold")
+    header.append(f"\nElapsed: {format_duration(elapsed)}", style="dim")
+    header.append(f"   ECC: ", style="dim")
+    if ecc_enabled:
+        header.append("enabled", style="green")
+    else:
+        header.append("standalone", style="dim")
+
+    # Running tasks table (enhanced with Agents/Skills columns)
+    running_table = Table(show_header=True, box=None, padding=(0, 1), header_style="dim")
+    running_table.add_column("", width=2)
+    running_table.add_column("Task", min_width=18, max_width=35)
+    running_table.add_column("Model", width=7)
+    running_table.add_column("Agents", width=14, overflow="ellipsis")
+    running_table.add_column("Time", width=8, justify="right")
+    running_table.add_column("Output", width=7, justify="right")
+    running_table.add_column("Tools", width=5, justify="right")
+    running_table.add_column("Activity", min_width=18, max_width=35)
+
+    for t in tasks:
+        if t.get("status") != "running":
+            continue
+        tid = t.get("id", "?")
+        name = t.get("name", tid)
+        model = t.get("model", "opus")
+        agents, skills = get_task_ecc_info(t, state)
+        agents_display = agents if agents else "\u2014"
+
+        task_elapsed = "\u2014"
+        output_size = "\u2014"
+        tools_used = "\u2014"
+        activity = ""
+
+        if log_dir:
+            stream_file = log_dir / f"{tid}.stream.jsonl"
+            output_file = log_dir / f"{tid}.output.md"
+
+            if stream_file.exists():
+                try:
+                    t_start = getattr(stream_file.stat(), "st_birthtime", stream_file.stat().st_ctime)
+                    te = int(now - t_start)
+                    task_elapsed = format_duration(te)
+                except Exception:
+                    pass
+
+                try:
+                    sz = stream_file.stat().st_size
+                    output_size = format_size(sz)
+                except Exception:
+                    pass
+
+                tc = count_tool_calls(stream_file)
+                if tc > 0:
+                    tools_used = str(tc)
+
+                activity = get_last_activity(stream_file)
+
+            if output_file.exists():
+                try:
+                    sz = output_file.stat().st_size
+                    if sz > 0:
+                        output_size = format_size(sz)
+                except Exception:
+                    pass
+
+        running_table.add_row(
+            spinner, name, model,
+            Text(agents_display, style="magenta", overflow="ellipsis", no_wrap=True),
+            task_elapsed, output_size, tools_used,
+            Text(activity, style="dim cyan", overflow="ellipsis", no_wrap=True),
+            style="yellow",
+        )
+
+    # Recent completed
+    recent_table = Table(show_header=False, box=None, padding=(0, 1))
+    recent_table.add_column("icon", width=2)
+    recent_table.add_column("name", min_width=25)
+    recent_table.add_column("agents", width=15)
+    recent_table.add_column("info", width=10)
+
+    done_tasks = [t for t in tasks if t.get("status") in ("done", "failed")]
+    for t in done_tasks[-5:]:
+        name = t.get("name", t.get("id", "?"))
+        tid = t.get("id", "?")
+        agents, _ = get_task_ecc_info(t, state)
+        agents_str = agents if agents else ""
+        info = ""
+        if log_dir:
+            output_file = log_dir / f"{tid}.output.md"
+            if output_file.exists():
+                try:
+                    info = format_size(output_file.stat().st_size)
+                except Exception:
+                    pass
+        if t["status"] == "done":
+            recent_table.add_row(
+                "\u2713", name,
+                Text(agents_str, style="dim magenta"),
+                info, style="green",
+            )
+        else:
+            recent_table.add_row(
+                "\u2717", name,
+                Text(agents_str, style="dim magenta"),
+                "(failed)", style="red",
+            )
+
+    # Pending
+    pending_names = [t.get("name", t.get("id", "?")) for t in tasks if t.get("status") == "pending"]
+
+    # Compose
+    parts = [header, Text("")]
+    if counts["running"] > 0:
+        parts.append(Text("RUNNING", style="bold yellow"))
+        parts.append(running_table)
+        parts.append(Text(""))
+    if done_tasks:
+        parts.append(Text("RECENT", style="bold dim"))
+        parts.append(recent_table)
+        parts.append(Text(""))
+    if pending_names:
+        parts.append(Text("QUEUED", style="bold dim"))
+        for pn in pending_names[:5]:
+            parts.append(Text(f"  \u25cb {pn}", style="dim"))
+        if len(pending_names) > 5:
+            parts.append(Text(f"  ... and {len(pending_names) - 5} more", style="dim"))
+
+    group = Group(*parts)
+    return Panel(
+        group,
+        title="claude-orchestra",
+        border_style="bold magenta",
+        padding=(1, 2),
+    )
+
+
+def main():
+    if len(sys.argv) < 2:
+        print("Usage: orchestra-dashboard <tasks.json | logs/run-dir/>")
+        sys.exit(1)
+
+    tasks_file, state_file = find_files(sys.argv[1])
+    if not tasks_file:
+        print(f"Could not find tasks file from: {sys.argv[1]}")
+        sys.exit(1)
+
+    console = Console()
+    start_time = time.time()
+
+    try:
+        with Live(build_display(tasks_file, state_file, start_time), console=console, refresh_per_second=0.5) as live:
+            while True:
+                time.sleep(2)
+                sf = state_file
+                if not sf or not sf.exists():
+                    ld = find_log_dir(tasks_file)
+                    if ld:
+                        sf = ld / "state.json"
+                        state_file = sf
+                live.update(build_display(tasks_file, sf, start_time))
+    except KeyboardInterrupt:
+        pass
+
+
+if __name__ == "__main__":
+    main()

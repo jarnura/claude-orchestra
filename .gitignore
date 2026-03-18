@@ -1,0 +1,29 @@
+# Logs — generated at runtime, can be large
+logs/
+
+# Audit task files — project-specific, generated per use
+audits/
+
+# Demo files
+demo-tasks.json
+demo-tasks.md
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+*.swp
+*.swo
+*~
+.idea/
+.vscode/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Temp
+*.tmp
+*.bak
