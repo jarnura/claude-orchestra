@@ -1,0 +1,25 @@
+{
+  "tasks": [
+    {
+      "id": "verify-config-crud",
+      "name": "Verify Config CRUD",
+      "prompt": "Test the configuration API routes by making actual API calls.\n\nTests:\n1. curl http://localhost:7890/api/config/paths\n2. curl http://localhost:7890/api/config/agents\n3. curl http://localhost:7890/api/config/skills\n4. curl http://localhost:7890/api/config/hooks\n5. Create a test agent via PUT\n6. Delete the test agent via DELETE\n\nReport any API errors or missing functionality.",
+      "status": "pending",
+      "workdir": "/home/jarnura/projects/claude-orchestra"
+    },
+    {
+      "id": "verify-workspace-run",
+      "name": "Verify Workspace Run",
+      "prompt": "Test workspace API routes by making API calls.\n\nTests:\n1. curl http://localhost:7890/api/workspace/repos\n2. Create a simple test task\n3. Run the test task\n4. Verify it appears in logs\n\nReport any issues found.",
+      "status": "pending",
+      "workdir": "/home/jarnura/projects/claude-orchestra"
+    },
+    {
+      "id": "verify-pipeline-viz",
+      "name": "Verify Pipeline Visualization",
+      "prompt": "Test the pipeline visualization in the browser.\n\nTests:\n1. Navigate to http://localhost:7890/#/pipelines\n2. Check that pipeline cards show stages\n3. Click a pipeline to see train visualization\n4. Verify SSE connection works (check browser console)\n\nReport any UI issues found.",
+      "status": "pending",
+      "workdir": "/home/jarnura/projects/claude-orchestra"
+    }
+  ]
+}

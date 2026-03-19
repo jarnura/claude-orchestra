@@ -1,0 +1,32 @@
+{
+  "tasks": [
+    {
+      "id": "ui-tab-navigation",
+      "name": "Add Tab Navigation",
+      "prompt": "Add tab navigation to viewer/index.html for 4 main screens.\n\nRequirements:\n1. Add tab bar below header with 4 tabs: Runs, Config, Workspace, Pipelines\n2. Update hash routing:\n   - #/runs or #/ - runs list (default)\n   - #/config - configuration screen\n   - #/workspace - workspace screen  \n   - #/pipelines - pipelines list\n3. Style: horizontal tabs, active tab highlighted with accent color\n\nKeep all existing functionality intact. Just add the tab infrastructure.\n\nEdit viewer/index.html to add tab navigation.",
+      "status": "pending",
+      "workdir": "/home/jarnura/projects/claude-orchestra"
+    },
+    {
+      "id": "ui-config-screen",
+      "name": "Add Config Screen",
+      "prompt": "Add configuration screen to viewer/index.html for managing agents, skills, hooks.\n\nRequirements:\n1. Create Config screen with 3 sub-tabs: Agents, Skills, Hooks\n\n2. Agents tab:\n   - List agents as cards with name, description, model\n   - Badge showing scope (global/project)\n   - Edit button opens modal with textarea\n   - Delete button with confirmation\n   - + New Agent button at top\n\n3. Skills tab: Same pattern as agents\n\n4. Hooks tab:\n   - Show hook profiles as cards (strict, standard, minimal)\n   - Click to view details\n\n5. Add scope toggle: Global (~/.claude) vs Project (.claude)\n\nUse these API endpoints:\n- GET /api/config/agents\n- GET /api/config/skills  \n- GET /api/config/hooks\n- PUT /api/config/agents/{name}\n- DELETE /api/config/agents/{name}\n\nEdit viewer/index.html to add the config screen.",
+      "status": "pending",
+      "workdir": "/home/jarnura/projects/claude-orchestra"
+    },
+    {
+      "id": "ui-workspace-screen",
+      "name": "Add Workspace Screen",
+      "prompt": "Add workspace screen to viewer/index.html for task management and execution.\n\nRequirements:\n1. Workspace screen layout:\n   - Repo selector dropdown at top\n   - Browse button to select directory\n   - Task list below\n\n2. Task list:\n   - Show tasks as cards with name, status\n   - Show assigned agents/skills as tags\n   - Run button to execute\n   - Edit button to modify\n   - Delete button\n\n3. Task editor modal:\n   - Name input\n   - Prompt textarea\n   - Model dropdown (opus, sonnet, haiku)\n   - Effort dropdown (low, medium, high)\n   - Agents multi-select (checkboxes from /api/config/agents)\n   - Skills multi-select (checkboxes from /api/config/skills)\n   - Workdir input\n   - Save and Run buttons\n\n4. Quick run panel:\n   - Simple prompt input\n   - Model selector\n   - Run button\n\nUse API: GET/POST /api/workspace/repos, /api/workspace/tasks\n\nEdit viewer/index.html to add the workspace screen.",
+      "status": "pending",
+      "workdir": "/home/jarnura/projects/claude-orchestra"
+    },
+    {
+      "id": "ui-pipeline-train",
+      "name": "Add Pipeline Train Visualization",
+      "prompt": "Enhance pipeline screen in viewer/index.html with train-style visualization.\n\nRequirements:\n1. Train-style visualization:\n   - Stages shown as connected boxes left to right\n   - Each box shows: stage name, status badge, task count, cost\n   - Animation when stage transitions (CSS transition)\n   - Color coding: pending (gray), running (yellow pulse), done (green), failed (red)\n\n2. Task breakdown:\n   - Click stage to expand task list below\n   - Show task status with icons\n   - Click task to view output\n\n3. Real-time updates:\n   - Connect to /api/events SSE endpoint\n   - Update stage status on events\n   - Show progress bar for running tasks\n\nAdd CSS animations for the train effect. Keep existing pipeline functionality.\n\nEdit viewer/index.html to enhance the pipeline screen.",
+      "status": "pending",
+      "workdir": "/home/jarnura/projects/claude-orchestra"
+    }
+  ]
+}

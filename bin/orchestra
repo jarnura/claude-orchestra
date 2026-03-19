@@ -256,7 +256,7 @@ launch_task() {
     local skills_info=$(echo "$task_json" | jq -r '.skills // "none"')
     log "Starting: ${GREEN}$name${NC} (model=${BLUE}$model${NC}, agents=${MAGENTA}$agents_info${NC}, skills=${MAGENTA}$skills_info${NC}, hooks=$hook_profile)"
 
-    local cmd=("$CLAUDE_CMD" --print --verbose --model "$model" --output-format stream-json)
+    local cmd=("$CLAUDE_CMD" --print --verbose --model "$model" --output-format stream-json --dangerously-skip-permissions)
 
     # Only add --effort if CLI supports it (check once, cache result)
     if [[ -z "${_EFFORT_SUPPORTED:-}" ]]; then

@@ -1,0 +1,28 @@
+{
+  "tasks": [
+    {
+      "id": "api-config-routes",
+      "name": "Add Config API Routes",
+      "prompt": "Implement configuration API routes in bin/orchestra-serve for agents, skills, and hooks CRUD.\n\nAdd these routes using Python stdlib (the file uses http.server):\n\n1. GET /api/config/paths - return {global_path, project_path} for ~/.claude and .claude\n2. GET /api/config/agents - list all agents with scope (global/project)\n3. GET /api/config/agents/{name} - get agent content\n4. PUT /api/config/agents/{name} - create/update agent (body: {scope, content})\n5. DELETE /api/config/agents/{name} - delete agent\n6. GET /api/config/skills - list all skills\n7. GET /api/config/skills/{name} - get skill content\n8. PUT /api/config/skills/{name} - create/update skill\n9. DELETE /api/config/skills/{name} - delete skill\n10. GET /api/config/hooks - list hook profiles (strict, standard, minimal)\n\nAlso add do_PUT, do_DELETE, do_OPTIONS methods to the handler.\n\nAgent files are at ~/.claude/agents/{name}.md (global) or .claude/agents/{name}.md (project)\nSkill files are at ~/.claude/skills/{name}/SKILL.md\n\nEdit the file bin/orchestra-serve to add these routes.",
+      "status": "done",
+      "workdir": "/home/jarnura/projects/claude-orchestra",
+      "cost_usd": 0.53824625
+    },
+    {
+      "id": "api-workspace-routes",
+      "name": "Add Workspace API Routes",
+      "prompt": "Implement workspace API routes in bin/orchestra-serve for task management.\n\nAdd these routes:\n\n1. GET /api/workspace/repos - list available repos from ~/projects and common locations\n2. GET /api/workspace/repos/{path}/tasks - list tasks.json files in repo\n3. POST /api/workspace/tasks - create task file\n4. PUT /api/workspace/tasks/{id} - update task\n5. DELETE /api/workspace/tasks/{id} - delete task\n6. POST /api/workspace/tasks/{id}/run - execute task via orchestra binary\n\nTask format:\n{\n  \"id\": \"task-slug\",\n  \"name\": \"Task Name\",\n  \"prompt\": \"...\",\n  \"workdir\": \"/path/to/repo\",\n  \"model\": \"opus\",\n  \"agents\": \"agent1,agent2\",\n  \"skills\": \"skill1,skill2\",\n  \"status\": \"pending\"\n}\n\nFor run endpoint, spawn orchestra binary and return {run_id}.\n\nEdit the file bin/orchestra-serve to add these routes.",
+      "status": "done",
+      "workdir": "/home/jarnura/projects/claude-orchestra",
+      "cost_usd": 1.97611775
+    },
+    {
+      "id": "api-sse-streaming",
+      "name": "Add SSE Streaming",
+      "prompt": "Implement Server-Sent Events (SSE) streaming in bin/orchestra-serve for real-time updates.\n\nAdd:\n\n1. GET /api/events - SSE endpoint that streams events to clients\n\nEvent types:\n- run_started, run_progress, run_completed\n- task_started, task_progress, task_completed\n- stage_started, stage_completed\n\nImplementation:\n- Add SSEBroker class to manage connected clients\n- Add LogWatcher thread to monitor logs directory for state.json changes\n- Watch for new .stream.jsonl lines for progress events\n- Send heartbeat every 15 seconds\n- Use Content-Type: text/event-stream\n\nFormat: event: <type>\\ndata: <json>\\n\\n\n\nEdit the file bin/orchestra-serve to add SSE support.",
+      "status": "done",
+      "workdir": "/home/jarnura/projects/claude-orchestra",
+      "cost_usd": 0.888607
+    }
+  ]
+}

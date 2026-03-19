@@ -43,6 +43,12 @@ header { background: var(--surface); border-bottom: 1px solid var(--border); pad
 #breadcrumb .sep { color: var(--text-dim); margin: 0 2px; }
 #breadcrumb .current { color: var(--text); }
 
+/* Tab bar */
+.tab-bar { background: var(--surface); border-bottom: 1px solid var(--border); display: flex; gap: 0; padding: 0 24px; position: sticky; top: 41px; z-index: 99; }
+.tab-bar a { display: inline-flex; align-items: center; gap: 6px; padding: 10px 18px; font-family: var(--mono); font-size: 0.8rem; color: var(--text-muted); text-decoration: none; border-bottom: 2px solid transparent; transition: color 0.15s, border-color 0.15s; }
+.tab-bar a:hover { color: var(--text); text-decoration: none; }
+.tab-bar a.active { color: var(--accent); border-bottom-color: var(--accent); }
+
 /* Main */
 main { max-width: 1200px; margin: 0 auto; padding: 24px; }
 
@@ -177,11 +183,57 @@ pre:hover .copy-btn { opacity: 1; }
 .tl-meta-label { color: var(--text-dim); font-size: 0.7rem; text-transform: uppercase; }
 .tl-meta-value { color: var(--text); font-weight: 600; }
 
+/* Config screen */
+.config-header { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; flex-wrap: wrap; }
+.config-tabs { display: flex; gap: 0; border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
+.config-tab { padding: 8px 18px; font-family: var(--mono); font-size: 0.8rem; cursor: pointer; background: var(--surface); color: var(--text-muted); border: none; border-right: 1px solid var(--border); transition: all 0.15s; }
+.config-tab:last-child { border-right: none; }
+.config-tab:hover { background: var(--surface2); color: var(--text); }
+.config-tab.active { background: var(--accent2); color: white; }
+.scope-toggle { display: flex; align-items: center; gap: 8px; margin-left: auto; font-family: var(--mono); font-size: 0.75rem; color: var(--text-muted); }
+.scope-toggle select { background: var(--surface); border: 1px solid var(--border); color: var(--text); padding: 5px 10px; border-radius: var(--radius); font-family: var(--mono); font-size: 0.75rem; cursor: pointer; }
+.config-toolbar { display: flex; align-items: center; gap: 8px; margin-bottom: 16px; }
+.config-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 12px; }
+.config-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; transition: border-color 0.15s; display: flex; flex-direction: column; }
+.config-card:hover { border-color: var(--border-light); }
+.config-card-header { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.config-card-name { font-family: var(--mono); font-weight: 600; font-size: 0.9rem; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.config-card-desc { font-size: 0.8rem; color: var(--text-muted); line-height: 1.4; margin-bottom: 10px; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.config-card-actions { display: flex; gap: 6px; margin-top: auto; padding-top: 10px; }
+.badge-scope { display: inline-block; padding: 2px 8px; border-radius: 3px; font-size: 0.7rem; font-weight: 700; font-family: var(--mono); }
+.badge-global { background: #1e3a5f; color: #93c5fd; border: 1px solid #3b82f640; }
+.badge-project { background: #3b0764; color: #c084fc; border: 1px solid #7c3aed40; }
+.btn-danger { background: #7f1d1d; border-color: #ef444480; color: #fca5a5; }
+.btn-danger:hover { background: #991b1b; border-color: var(--red); color: white; }
+.btn-sm { padding: 4px 10px; font-size: 0.7rem; }
+.modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.7); z-index: 200; display: flex; align-items: center; justify-content: center; padding: 20px; }
+.modal { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; width: 100%; max-width: 700px; max-height: 85vh; display: flex; flex-direction: column; }
+.modal-header { display: flex; align-items: center; gap: 12px; padding: 16px 20px; border-bottom: 1px solid var(--border); }
+.modal-header h3 { font-family: var(--mono); font-size: 1rem; margin: 0; flex: 1; }
+.modal-close { background: none; border: none; color: var(--text-muted); font-size: 1.2rem; cursor: pointer; padding: 4px 8px; }
+.modal-close:hover { color: var(--text); }
+.modal-body { padding: 20px; overflow-y: auto; flex: 1; }
+.modal-footer { display: flex; justify-content: flex-end; gap: 8px; padding: 12px 20px; border-top: 1px solid var(--border); }
+.form-group { margin-bottom: 14px; }
+.form-label { display: block; font-family: var(--mono); font-size: 0.75rem; color: var(--text-muted); margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.03em; }
+.form-input { width: 100%; background: var(--surface2); border: 1px solid var(--border); color: var(--text); padding: 8px 12px; border-radius: var(--radius); font-family: var(--mono); font-size: 0.85rem; outline: none; box-sizing: border-box; }
+.form-input:focus { border-color: var(--accent); }
+.form-textarea { width: 100%; min-height: 300px; background: var(--surface2); border: 1px solid var(--border); color: var(--text); padding: 12px; border-radius: var(--radius); font-family: var(--mono); font-size: 0.8rem; line-height: 1.5; resize: vertical; outline: none; box-sizing: border-box; }
+.form-textarea:focus { border-color: var(--accent); }
+.config-empty { text-align: center; color: var(--text-muted); padding: 40px; font-family: var(--mono); font-size: 0.85rem; }
+.hook-card-name { font-family: var(--mono); font-weight: 700; font-size: 1rem; margin-bottom: 6px; text-transform: capitalize; }
+.hook-card-desc { font-size: 0.85rem; color: var(--text-muted); }
+
 /* Responsive */
 @media (max-width: 768px) {
   main { padding: 12px; }
   .task-grid { grid-template-columns: 1fr; }
+  .config-grid { grid-template-columns: 1fr; }
   header { padding: 10px 16px; }
+  .tab-bar { padding: 0 16px; }
+  .tab-bar a { padding: 8px 12px; font-size: 0.75rem; }
+  .config-header { flex-direction: column; align-items: flex-start; }
+  .scope-toggle { margin-left: 0; }
 }
 
 /* Pipeline view */
@@ -189,24 +241,49 @@ pre:hover .copy-btn { opacity: 1; }
 .pipeline-header h2 { font-family: var(--mono); font-size: 1.1rem; margin-bottom: 8px; }
 .pipeline-meta { display: flex; flex-wrap: wrap; gap: 12px; font-size: 0.85rem; color: var(--text-muted); }
 
+/* Train visualization */
+.train-container { display: flex; align-items: center; overflow-x: auto; padding: 24px 0 32px; gap: 0; }
+.train-car { background: var(--surface); border: 2px solid var(--border); border-radius: 8px; padding: 16px 20px; min-width: 200px; max-width: 280px; flex-shrink: 0; cursor: pointer; transition: border-color 0.2s, box-shadow 0.2s, transform 0.15s; position: relative; }
+.train-car:hover { border-color: var(--accent); transform: translateY(-2px); box-shadow: 0 4px 12px rgba(168, 85, 247, 0.15); }
+.train-car.selected { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.train-car.pending { border-color: var(--text-dim); }
+.train-car.running { border-color: var(--yellow); animation: train-pulse 2s ease-in-out infinite; }
+.train-car.done { border-color: var(--green); }
+.train-car.failed { border-color: var(--red); }
+@keyframes train-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(234, 179, 8, 0); border-color: var(--yellow); }
+  50% { box-shadow: 0 0 16px 2px rgba(234, 179, 8, 0.25); border-color: #fcd34d; }
+}
+.train-car-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
+.train-car-num { font-family: var(--mono); font-size: 0.65rem; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.05em; }
+.train-car-name { font-weight: 600; font-size: 0.95rem; margin-bottom: 8px; color: var(--text); }
+.train-car-stats { display: flex; gap: 10px; font-family: var(--mono); font-size: 0.75rem; color: var(--text-muted); }
+.train-car-stats span { display: flex; align-items: center; gap: 3px; }
+.train-car-expand { font-family: var(--mono); font-size: 0.65rem; color: var(--text-dim); margin-top: 8px; transition: color 0.15s; }
+.train-car:hover .train-car-expand { color: var(--accent); }
+
+.train-connector { display: flex; align-items: center; flex-shrink: 0; width: 40px; position: relative; }
+.train-connector-line { width: 100%; height: 2px; background: var(--border); position: relative; }
+.train-connector-arrow { position: absolute; right: -1px; top: 50%; transform: translateY(-50%); width: 0; height: 0; border-top: 5px solid transparent; border-bottom: 5px solid transparent; border-left: 8px solid var(--border); }
+.train-connector.active .train-connector-line { background: var(--green); }
+.train-connector.active .train-connector-arrow { border-left-color: var(--green); }
+
+/* Train task breakdown panel */
+.train-tasks-panel { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); margin-top: 16px; overflow: hidden; animation: slide-down 0.2s ease-out; }
+@keyframes slide-down { from { opacity: 0; transform: translateY(-8px); } to { opacity: 1; transform: translateY(0); } }
+.train-tasks-header { display: flex; align-items: center; gap: 10px; padding: 12px 16px; border-bottom: 1px solid var(--border); }
+.train-tasks-header h3 { font-family: var(--mono); font-size: 0.85rem; margin: 0; }
+.train-tasks-list { padding: 4px 0; }
+.train-task-row { display: flex; align-items: center; gap: 10px; padding: 8px 16px; font-family: var(--mono); font-size: 0.8rem; border-bottom: 1px solid var(--border); transition: background 0.1s; cursor: pointer; }
+.train-task-row:last-child { border-bottom: none; }
+.train-task-row:hover { background: var(--surface2); }
+.train-task-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); }
+.train-task-cost { color: var(--text-dim); font-size: 0.75rem; }
+.train-task-link { color: var(--accent); font-size: 0.75rem; white-space: nowrap; }
+
+/* Legacy pipeline styles kept for list view */
 .pipeline-flow { display: flex; align-items: flex-start; gap: 0; overflow-x: auto; padding: 16px 0 24px; }
 .pipeline-stage-wrap { display: flex; align-items: flex-start; }
-.pipeline-stage { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; min-width: 200px; max-width: 260px; flex-shrink: 0; transition: border-color 0.15s; cursor: pointer; }
-.pipeline-stage:hover { border-color: var(--accent); }
-.pipeline-stage.stage-pending { border-left: 3px solid var(--text-dim); }
-.pipeline-stage.stage-running { border-left: 3px solid var(--yellow); animation: pulse 2s infinite; }
-.pipeline-stage.stage-done { border-left: 3px solid var(--green); }
-.pipeline-stage.stage-failed { border-left: 3px solid var(--red); }
-.pipeline-stage-header { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
-.pipeline-stage-num { font-family: var(--mono); font-size: 0.7rem; color: var(--text-dim); }
-.pipeline-stage-name { font-weight: 600; font-size: 0.9rem; flex: 1; }
-.pipeline-stage-meta { font-family: var(--mono); font-size: 0.75rem; color: var(--text-muted); margin-bottom: 4px; }
-.pipeline-task-list { margin-top: 10px; border-top: 1px solid var(--border); padding-top: 8px; display: none; }
-.pipeline-stage.expanded .pipeline-task-list { display: block; }
-.pipeline-task-item { font-family: var(--mono); font-size: 0.75rem; padding: 3px 0; display: flex; align-items: center; gap: 6px; border-bottom: 1px solid var(--border); }
-.pipeline-task-item:last-child { border-bottom: none; }
-.expand-hint { font-family: var(--mono); font-size: 0.7rem; color: var(--text-dim); margin-top: 6px; }
-
 .pipeline-arrow { color: var(--text-dim); font-size: 1.4rem; padding: 0 6px; flex-shrink: 0; align-self: center; margin-bottom: 20px; }
 
 .pipelines-section { margin-bottom: 28px; }
@@ -222,6 +299,43 @@ pre:hover .copy-btn { opacity: 1; }
 .stage-pill-running { background: #422006; color: #fcd34d; animation: pulse 2s infinite; }
 .stage-pill-done { background: #14532d; color: #86efac; }
 .stage-pill-failed { background: #7f1d1d; color: #fca5a5; }
+
+/* Workspace */
+.ws-top { display: flex; gap: 12px; margin-bottom: 20px; align-items: flex-end; }
+.ws-select { flex: 1; }
+.ws-select label { display: block; font-family: var(--mono); font-size: 0.75rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 4px; }
+.ws-select select, .ws-select input[type="text"] { width: 100%; background: var(--surface); border: 1px solid var(--border); color: var(--text); padding: 8px 12px; border-radius: var(--radius); font-family: var(--mono); font-size: 0.85rem; outline: none; }
+.ws-select select:focus, .ws-select input[type="text"]:focus { border-color: var(--accent); }
+.ws-file-tabs { display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 16px; }
+.ws-file-tab { font-family: var(--mono); font-size: 0.75rem; padding: 4px 10px; border-radius: var(--radius); cursor: pointer; border: 1px solid var(--border); background: var(--surface); color: var(--text-muted); transition: all 0.15s; }
+.ws-file-tab:hover { border-color: var(--accent); color: var(--text); }
+.ws-file-tab.active { background: var(--accent2); border-color: var(--accent); color: white; }
+.ws-file-tab .file-count { font-size: 0.65rem; opacity: 0.7; margin-left: 4px; }
+.ws-task-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px; transition: border-color 0.15s; }
+.ws-task-card:hover { border-color: var(--border-light); }
+.ws-task-header { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.ws-task-name { font-weight: 600; font-size: 0.9rem; flex: 1; }
+.ws-task-tags { display: flex; flex-wrap: wrap; gap: 3px; margin-bottom: 10px; }
+.ws-task-tags .tag-agent { background: #1e3a5f; color: #93c5fd; border-color: #3b82f640; }
+.ws-task-tags .tag-skill { background: #3b0764; color: #c084fc; border-color: #7c3aed40; }
+.ws-task-prompt { font-family: var(--mono); font-size: 0.75rem; color: var(--text-muted); max-height: 40px; overflow: hidden; text-overflow: ellipsis; margin-bottom: 10px; white-space: nowrap; }
+.ws-task-actions { display: flex; gap: 6px; }
+.btn-success { border-color: #22c55e60; color: #86efac; }
+.btn-success:hover { background: #14532d; border-color: var(--green); color: #86efac; }
+.ws-quickrun { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; margin-bottom: 20px; }
+.ws-quickrun h3 { font-family: var(--mono); font-size: 0.85rem; color: var(--text-muted); margin-bottom: 10px; }
+.ws-quickrun-row { display: flex; gap: 8px; align-items: flex-end; }
+.ws-quickrun-row .ws-select { flex: 3; }
+.ws-quickrun-row .ws-select.ws-model-sel { flex: 1; }
+.ws-quickrun textarea { width: 100%; background: var(--surface2); border: 1px solid var(--border); color: var(--text); padding: 8px 12px; border-radius: var(--radius); font-family: var(--mono); font-size: 0.85rem; outline: none; resize: vertical; min-height: 60px; }
+.ws-quickrun textarea:focus { border-color: var(--accent); }
+.ws-empty { text-align: center; color: var(--text-muted); padding: 40px; font-family: var(--mono); font-size: 0.85rem; }
+.ws-section-title { font-family: var(--mono); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); margin-bottom: 10px; display: flex; align-items: center; gap: 8px; }
+.ws-checks { display: flex; flex-wrap: wrap; gap: 6px; max-height: 140px; overflow-y: auto; padding: 4px; }
+.ws-check { display: flex; align-items: center; gap: 4px; font-family: var(--mono); font-size: 0.75rem; color: var(--text-muted); cursor: pointer; padding: 2px 6px; border-radius: 3px; border: 1px solid var(--border); background: var(--surface); transition: all 0.15s; user-select: none; }
+.ws-check:hover { border-color: var(--accent); }
+.ws-check input { accent-color: var(--accent); }
+.ws-check.checked { background: var(--surface3); border-color: var(--accent); color: var(--text); }
 </style>
 </head>
 <body>
@@ -229,6 +343,12 @@ pre:hover .copy-btn { opacity: 1; }
   <div class="brand">claude-orchestra</div>
   <nav id="breadcrumb"></nav>
 </header>
+<nav class="tab-bar" id="tab-bar">
+  <a href="#/runs">Runs</a>
+  <a href="#/config">Config</a>
+  <a href="#/workspace">Workspace</a>
+  <a href="#/pipelines">Pipelines</a>
+</nav>
 <main id="app">
   <div class="loading">Loading runs...</div>
 </main>
@@ -286,6 +406,98 @@ const api = {
   async getPipeline(id) {
     const r = await fetch(`${API_BASE}/api/pipeline/${id}`);
     if (!r.ok) throw new Error(`Failed: ${r.status}`);
+    return r.json();
+  },
+  // Config API
+  async getAgents() {
+    const r = await fetch(`${API_BASE}/api/config/agents`);
+    if (!r.ok) throw new Error(`Failed: ${r.status}`);
+    return r.json();
+  },
+  async getAgent(name) {
+    const r = await fetch(`${API_BASE}/api/config/agents/${encodeURIComponent(name)}`);
+    if (!r.ok) throw new Error(`Failed: ${r.status}`);
+    return r.json();
+  },
+  async putAgent(name, scope, content) {
+    const r = await fetch(`${API_BASE}/api/config/agents/${encodeURIComponent(name)}`, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ scope, content })
+    });
+    if (!r.ok) throw new Error(`Failed: ${r.status}`);
+    return r.json();
+  },
+  async deleteAgent(name) {
+    const r = await fetch(`${API_BASE}/api/config/agents/${encodeURIComponent(name)}`, { method: 'DELETE' });
+    if (!r.ok) throw new Error(`Failed: ${r.status}`);
+    return r.json();
+  },
+  async getSkills() {
+    const r = await fetch(`${API_BASE}/api/config/skills`);
+    if (!r.ok) throw new Error(`Failed: ${r.status}`);
+    return r.json();
+  },
+  async getSkill(name) {
+    const r = await fetch(`${API_BASE}/api/config/skills/${encodeURIComponent(name)}`);
+    if (!r.ok) throw new Error(`Failed: ${r.status}`);
+    return r.json();
+  },
+  async putSkill(name, scope, content) {
+    const r = await fetch(`${API_BASE}/api/config/skills/${encodeURIComponent(name)}`, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ scope, content })
+    });
+    if (!r.ok) throw new Error(`Failed: ${r.status}`);
+    return r.json();
+  },
+  async deleteSkill(name) {
+    const r = await fetch(`${API_BASE}/api/config/skills/${encodeURIComponent(name)}`, { method: 'DELETE' });
+    if (!r.ok) throw new Error(`Failed: ${r.status}`);
+    return r.json();
+  },
+  async getHooks() {
+    const r = await fetch(`${API_BASE}/api/config/hooks`);
+    if (!r.ok) throw new Error(`Failed: ${r.status}`);
+    return r.json();
+  },
+  // Workspace API
+  async getRepos() {
+    const r = await fetch(`${API_BASE}/api/workspace/repos`);
+    if (!r.ok) throw new Error(`Failed: ${r.status}`);
+    return r.json();
+  },
+  async getRepoTasks(repoPath) {
+    const r = await fetch(`${API_BASE}/api/workspace/repos/${encodeURIComponent(repoPath)}/tasks`);
+    if (!r.ok) throw new Error(`Failed: ${r.status}`);
+    return r.json();
+  },
+  async createTask(file, task) {
+    const r = await fetch(`${API_BASE}/api/workspace/tasks`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ file, task })
+    });
+    if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.error || `Failed: ${r.status}`); }
+    return r.json();
+  },
+  async updateTask(taskId, file, fields) {
+    const r = await fetch(`${API_BASE}/api/workspace/tasks/${encodeURIComponent(taskId)}?file=${encodeURIComponent(file)}`, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(fields)
+    });
+    if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.error || `Failed: ${r.status}`); }
+    return r.json();
+  },
+  async deleteTask(taskId, file) {
+    const r = await fetch(`${API_BASE}/api/workspace/tasks/${encodeURIComponent(taskId)}?file=${encodeURIComponent(file)}`, { method: 'DELETE' });
+    if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.error || `Failed: ${r.status}`); }
+    return r.json();
+  },
+  async runTask(taskId, file) {
+    const r = await fetch(`${API_BASE}/api/workspace/tasks/${encodeURIComponent(taskId)}/run`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ file })
+    });
+    if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.error || `Failed: ${r.status}`); }
     return r.json();
   }
 };
@@ -431,14 +643,41 @@ function makeCollapsible(container) {
   });
 }
 
+// ── Tab Highlighting ──
+function updateActiveTab() {
+  const hash = location.hash || '#/runs';
+  const tabs = document.querySelectorAll('#tab-bar a');
+  tabs.forEach(tab => {
+    const href = tab.getAttribute('href');
+    const isActive = hash === href
+      || (href === '#/runs' && (hash === '#/' || hash === '#' || hash.startsWith('#/run/')))
+      || (href === '#/pipelines' && hash.startsWith('#/pipeline/'));
+    tab.classList.toggle('active', isActive);
+  });
+}
+
 // ── Router ──
 function route() {
   const hash = location.hash || '#/';
   const app = $('#app');
+  updateActiveTab();
+
+  // Clean up SSE when navigating away from pipeline view
+  if (pipelineEventSource && !hash.match(/^#\/pipeline\//)) {
+    pipelineEventSource.close();
+    pipelineEventSource = null;
+    selectedTrainStage = null;
+  }
 
   let m;
-  if (hash === '#/' || hash === '#') {
+  if (hash === '#/' || hash === '#' || hash === '#/runs') {
     renderSessionList();
+  } else if (hash === '#/config') {
+    renderConfigScreen();
+  } else if (hash === '#/workspace') {
+    renderWorkspaceScreen();
+  } else if (hash === '#/pipelines') {
+    renderPipelinesScreen();
   } else if (m = hash.match(/^#\/run\/([^/]+)$/)) {
     renderRunDetail(m[1]);
   } else if (m = hash.match(/^#\/run\/([^/]+)\/([^/]+)\/output$/)) {
@@ -536,7 +775,7 @@ async function renderSessionList() {
 
 async function renderRunDetail(runId) {
   const app = $('#app');
-  setBreadcrumb({ text: 'Runs', href: '#/' }, { text: runId });
+  setBreadcrumb({ text: 'Runs', href: '#/runs' }, { text: runId });
   app.innerHTML = '<div class="loading">Loading run...</div>';
 
   try {
@@ -593,7 +832,7 @@ async function renderRunDetail(runId) {
 async function renderTaskOutput(runId, taskId) {
   const app = $('#app');
   const displayName = taskId.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
-  setBreadcrumb({ text: 'Runs', href: '#/' }, { text: runId, href: `#/run/${runId}` }, { text: displayName });
+  setBreadcrumb({ text: 'Runs', href: '#/runs' }, { text: runId, href: `#/run/${runId}` }, { text: displayName });
   app.innerHTML = '<div class="loading">Loading output...</div>';
 
   try {
@@ -629,7 +868,7 @@ async function renderTaskOutput(runId, taskId) {
 async function renderTaskTimeline(runId, taskId) {
   const app = $('#app');
   const displayName = taskId.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
-  setBreadcrumb({ text: 'Runs', href: '#/' }, { text: runId, href: `#/run/${runId}` }, { text: displayName + ' Timeline' });
+  setBreadcrumb({ text: 'Runs', href: '#/runs' }, { text: runId, href: `#/run/${runId}` }, { text: displayName + ' Timeline' });
   app.innerHTML = '<div class="loading">Parsing timeline...</div>';
 
   try {
@@ -763,11 +1002,789 @@ function escapeHtml(str) {
   return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
-// ── Pipeline View ──
+// ── Config Screen ──
+// ── Config Screen State ──
+const configState = { tab: 'agents', scope: 'all', agents: null, skills: null, hooks: null };
+
+async function renderConfigScreen() {
+  const app = $('#app');
+  setBreadcrumb({ text: 'Config' });
+  app.innerHTML = `
+    <div class="config-header">
+      <div class="config-tabs">
+        <button class="config-tab ${configState.tab === 'agents' ? 'active' : ''}" onclick="configSwitchTab('agents')">Agents</button>
+        <button class="config-tab ${configState.tab === 'skills' ? 'active' : ''}" onclick="configSwitchTab('skills')">Skills</button>
+        <button class="config-tab ${configState.tab === 'hooks' ? 'active' : ''}" onclick="configSwitchTab('hooks')">Hooks</button>
+      </div>
+      <div class="scope-toggle">
+        <span>Scope:</span>
+        <select id="scope-select" onchange="configSwitchScope(this.value)">
+          <option value="all" ${configState.scope === 'all' ? 'selected' : ''}>All</option>
+          <option value="global" ${configState.scope === 'global' ? 'selected' : ''}>Global (~/.claude)</option>
+          <option value="project" ${configState.scope === 'project' ? 'selected' : ''}>Project (.claude)</option>
+        </select>
+      </div>
+    </div>
+    <div id="config-content"><div class="loading">Loading...</div></div>
+  `;
+  await configRenderTab();
+}
+
+function configSwitchTab(tab) {
+  configState.tab = tab;
+  renderConfigScreen();
+}
+
+function configSwitchScope(scope) {
+  configState.scope = scope;
+  configRenderTab();
+}
+
+async function configRenderTab() {
+  const content = $('#config-content');
+  if (!content) return;
+  content.innerHTML = '<div class="loading">Loading...</div>';
+  try {
+    if (configState.tab === 'agents') await configRenderAgents(content);
+    else if (configState.tab === 'skills') await configRenderSkills(content);
+    else if (configState.tab === 'hooks') await configRenderHooks(content);
+  } catch (e) {
+    content.innerHTML = `<div class="error-banner">Error: ${e.message}</div>`;
+  }
+}
+
+function configFilterByScope(items) {
+  if (configState.scope === 'all') return items;
+  return items.filter(i => i.scope === configState.scope);
+}
+
+function configExtractMeta(content) {
+  const lines = (content || '').split('\n');
+  let desc = '', model = '';
+  for (const line of lines.slice(0, 30)) {
+    const dl = line.toLowerCase();
+    if (dl.startsWith('description:')) desc = line.slice(12).trim();
+    if (dl.match(/^model\s*:/)) model = line.split(':').slice(1).join(':').trim();
+    if (dl.match(/^#+\s/) && !desc) desc = line.replace(/^#+\s*/, '');
+  }
+  return { desc: desc || 'No description', model };
+}
+
+// ── Agents Tab ──
+async function configRenderAgents(content) {
+  configState.agents = (await api.getAgents()).agents;
+  const filtered = configFilterByScope(configState.agents);
+
+  let html = `<div class="config-toolbar">
+    <button class="btn btn-primary" onclick="configNewAgent()">+ New Agent</button>
+    <span style="color:var(--text-dim);font-family:var(--mono);font-size:0.75rem;margin-left:auto">${filtered.length} agent${filtered.length !== 1 ? 's' : ''}</span>
+  </div>`;
+
+  if (filtered.length === 0) {
+    html += '<div class="config-empty">No agents found</div>';
+  } else {
+    html += '<div class="config-grid">';
+    for (const agent of filtered) {
+      html += configAgentCard(agent);
+    }
+    html += '</div>';
+  }
+  content.innerHTML = html;
+}
+
+function configAgentCard(agent) {
+  return `<div class="config-card">
+    <div class="config-card-header">
+      <span class="config-card-name">${escapeHtml(agent.name)}</span>
+      <span class="badge badge-scope badge-${agent.scope}">${agent.scope}</span>
+    </div>
+    <div class="config-card-desc">${escapeHtml(agent.path)}</div>
+    <div class="config-card-actions">
+      <button class="btn btn-sm" onclick="configEditAgent('${escapeHtml(agent.name)}')">Edit</button>
+      <button class="btn btn-sm btn-danger" onclick="configDeleteAgent('${escapeHtml(agent.name)}')">Delete</button>
+    </div>
+  </div>`;
+}
+
+async function configNewAgent() {
+  configShowEditorModal('New Agent', '', '', configState.scope === 'all' ? 'project' : configState.scope, async (name, scope, body) => {
+    await api.putAgent(name, scope, body);
+    configState.agents = null;
+    await configRenderTab();
+  }, true);
+}
+
+async function configEditAgent(name) {
+  try {
+    const data = await api.getAgent(name);
+    configShowEditorModal(`Edit: ${name}`, name, data.content, data.scope, async (_name, scope, body) => {
+      await api.putAgent(name, scope, body);
+      configState.agents = null;
+      await configRenderTab();
+    }, false);
+  } catch (e) {
+    alert('Failed to load agent: ' + e.message);
+  }
+}
+
+async function configDeleteAgent(name) {
+  if (!confirm(`Delete agent "${name}"? This cannot be undone.`)) return;
+  try {
+    await api.deleteAgent(name);
+    configState.agents = null;
+    await configRenderTab();
+  } catch (e) {
+    alert('Failed to delete agent: ' + e.message);
+  }
+}
+
+// ── Skills Tab ──
+async function configRenderSkills(content) {
+  configState.skills = (await api.getSkills()).skills;
+  const filtered = configFilterByScope(configState.skills);
+
+  let html = `<div class="config-toolbar">
+    <button class="btn btn-primary" onclick="configNewSkill()">+ New Skill</button>
+    <span style="color:var(--text-dim);font-family:var(--mono);font-size:0.75rem;margin-left:auto">${filtered.length} skill${filtered.length !== 1 ? 's' : ''}</span>
+  </div>`;
+
+  if (filtered.length === 0) {
+    html += '<div class="config-empty">No skills found</div>';
+  } else {
+    html += '<div class="config-grid">';
+    for (const skill of filtered) {
+      html += configSkillCard(skill);
+    }
+    html += '</div>';
+  }
+  content.innerHTML = html;
+}
+
+function configSkillCard(skill) {
+  return `<div class="config-card">
+    <div class="config-card-header">
+      <span class="config-card-name">${escapeHtml(skill.name)}</span>
+      <span class="badge badge-scope badge-${skill.scope}">${skill.scope}</span>
+    </div>
+    <div class="config-card-desc">${escapeHtml(skill.path)}</div>
+    <div class="config-card-actions">
+      <button class="btn btn-sm" onclick="configEditSkill('${escapeHtml(skill.name)}')">Edit</button>
+      <button class="btn btn-sm btn-danger" onclick="configDeleteSkill('${escapeHtml(skill.name)}')">Delete</button>
+    </div>
+  </div>`;
+}
+
+async function configNewSkill() {
+  configShowEditorModal('New Skill', '', '', configState.scope === 'all' ? 'project' : configState.scope, async (name, scope, body) => {
+    await api.putSkill(name, scope, body);
+    configState.skills = null;
+    await configRenderTab();
+  }, true);
+}
+
+async function configEditSkill(name) {
+  try {
+    const data = await api.getSkill(name);
+    configShowEditorModal(`Edit: ${name}`, name, data.content, data.scope, async (_name, scope, body) => {
+      await api.putSkill(name, scope, body);
+      configState.skills = null;
+      await configRenderTab();
+    }, false);
+  } catch (e) {
+    alert('Failed to load skill: ' + e.message);
+  }
+}
+
+async function configDeleteSkill(name) {
+  if (!confirm(`Delete skill "${name}"? This cannot be undone.`)) return;
+  try {
+    await api.deleteSkill(name);
+    configState.skills = null;
+    await configRenderTab();
+  } catch (e) {
+    alert('Failed to delete skill: ' + e.message);
+  }
+}
+
+// ── Hooks Tab ──
+async function configRenderHooks(content) {
+  configState.hooks = (await api.getHooks()).hooks;
+
+  let html = '<div class="config-grid">';
+  if (configState.hooks.length === 0) {
+    html = '<div class="config-empty">No hook profiles found</div>';
+  } else {
+    for (const hook of configState.hooks) {
+      const badgeCls = hook.name === 'strict' ? 'badge-critical' : hook.name === 'standard' ? 'badge-medium' : 'badge-low';
+      html += `<div class="config-card">
+        <div class="config-card-header">
+          <span class="badge ${badgeCls}">${escapeHtml(hook.name)}</span>
+        </div>
+        <div class="hook-card-desc">${escapeHtml(hook.description)}</div>
+      </div>`;
+    }
+    html += '</div>';
+  }
+  content.innerHTML = html;
+}
+
+// ── Editor Modal ──
+function configShowEditorModal(title, name, body, scope, onSave, isNew) {
+  // Remove existing modal if any
+  const existing = document.querySelector('.modal-overlay');
+  if (existing) existing.remove();
+
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
+
+  overlay.innerHTML = `<div class="modal">
+    <div class="modal-header">
+      <h3>${escapeHtml(title)}</h3>
+      <button class="modal-close" onclick="this.closest('.modal-overlay').remove()">&times;</button>
+    </div>
+    <div class="modal-body">
+      ${isNew ? `<div class="form-group">
+        <label class="form-label">Name</label>
+        <input type="text" class="form-input" id="modal-name" value="${escapeHtml(name)}" placeholder="my-agent-name" pattern="[a-zA-Z0-9_-]+">
+      </div>` : ''}
+      <div class="form-group">
+        <label class="form-label">Scope</label>
+        <select class="form-input" id="modal-scope">
+          <option value="global" ${scope === 'global' ? 'selected' : ''}>Global (~/.claude)</option>
+          <option value="project" ${scope === 'project' ? 'selected' : ''}>Project (.claude)</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Content (Markdown)</label>
+        <textarea class="form-textarea" id="modal-content">${escapeHtml(body)}</textarea>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn" onclick="this.closest('.modal-overlay').remove()">Cancel</button>
+      <button class="btn btn-primary" id="modal-save">Save</button>
+    </div>
+  </div>`;
+
+  document.body.appendChild(overlay);
+
+  // Focus on name input if new, otherwise content
+  const focusEl = isNew ? overlay.querySelector('#modal-name') : overlay.querySelector('#modal-content');
+  if (focusEl) setTimeout(() => focusEl.focus(), 50);
+
+  overlay.querySelector('#modal-save').onclick = async () => {
+    const finalName = isNew ? overlay.querySelector('#modal-name').value.trim() : name;
+    const finalScope = overlay.querySelector('#modal-scope').value;
+    const finalContent = overlay.querySelector('#modal-content').value;
+
+    if (!finalName) { alert('Name is required'); return; }
+    if (!/^[a-zA-Z0-9_-]+$/.test(finalName)) { alert('Name must contain only letters, numbers, hyphens, and underscores'); return; }
+    if (!finalContent.trim()) { alert('Content is required'); return; }
+
+    const saveBtn = overlay.querySelector('#modal-save');
+    saveBtn.textContent = 'Saving...';
+    saveBtn.disabled = true;
+
+    try {
+      await onSave(finalName, finalScope, finalContent);
+      overlay.remove();
+    } catch (e) {
+      alert('Save failed: ' + e.message);
+      saveBtn.textContent = 'Save';
+      saveBtn.disabled = false;
+    }
+  };
+
+  // Esc to close
+  const escHandler = (e) => {
+    if (e.key === 'Escape') { overlay.remove(); document.removeEventListener('keydown', escHandler); }
+  };
+  document.addEventListener('keydown', escHandler);
+}
+
+// ── Workspace Screen ──
+const wsState = { repos: null, selectedRepo: null, taskFiles: null, selectedFile: null, tasks: [], agents: null, skills: null };
+
+async function renderWorkspaceScreen() {
+  const app = $('#app');
+  setBreadcrumb({ text: 'Workspace' });
+  app.innerHTML = '<div class="loading">Loading workspace...</div>';
+
+  try {
+    if (!wsState.repos) {
+      const data = await api.getRepos();
+      wsState.repos = data.repos || [];
+    }
+
+    let html = '';
+
+    // ── Quick Run Panel ──
+    html += `<div class="ws-quickrun">
+      <h3>Quick Run</h3>
+      <div class="form-group">
+        <textarea id="ws-qr-prompt" class="form-textarea" style="min-height:60px;max-height:120px" placeholder="Enter prompt to run..."></textarea>
+      </div>
+      <div class="ws-quickrun-row">
+        <div class="ws-select ws-model-sel">
+          <label>Model</label>
+          <select id="ws-qr-model">
+            <option value="opus">opus</option>
+            <option value="sonnet" selected>sonnet</option>
+            <option value="haiku">haiku</option>
+          </select>
+        </div>
+        <button class="btn btn-primary" onclick="wsQuickRun()">Run</button>
+      </div>
+    </div>`;
+
+    // ── Repo Selector ──
+    html += `<div class="ws-top">
+      <div class="ws-select" style="flex:1">
+        <label>Repository</label>
+        <select id="ws-repo-select" onchange="wsSelectRepo(this.value)">
+          <option value="">— select repo —</option>
+          ${wsState.repos.map(r =>
+            `<option value="${escapeHtml(r.path)}" ${wsState.selectedRepo === r.path ? 'selected' : ''}>${escapeHtml(r.name)} (${escapeHtml(r.path)})</option>`
+          ).join('')}
+        </select>
+      </div>
+      <button class="btn btn-primary" onclick="wsNewTask()" ${!wsState.selectedRepo ? 'disabled style="opacity:0.4"' : ''}>+ New Task</button>
+    </div>`;
+
+    // ── Task file tabs + task list ──
+    html += '<div id="ws-content">';
+    if (wsState.selectedRepo && wsState.taskFiles) {
+      html += wsRenderTaskArea();
+    } else if (wsState.selectedRepo) {
+      html += '<div class="loading">Loading tasks...</div>';
+    } else {
+      html += '<div class="ws-empty">Select a repository to view tasks</div>';
+    }
+    html += '</div>';
+
+    app.innerHTML = html;
+
+    // If repo is selected but tasks not loaded yet, load them
+    if (wsState.selectedRepo && !wsState.taskFiles) {
+      await wsLoadRepoTasks(wsState.selectedRepo);
+    }
+  } catch (e) {
+    app.innerHTML = `<div class="error-banner">Error: ${e.message}</div>`;
+  }
+}
+
+async function wsSelectRepo(repoPath) {
+  wsState.selectedRepo = repoPath || null;
+  wsState.taskFiles = null;
+  wsState.selectedFile = null;
+  wsState.tasks = [];
+  await renderWorkspaceScreen();
+}
+
+async function wsLoadRepoTasks(repoPath) {
+  try {
+    const data = await api.getRepoTasks(repoPath);
+    wsState.taskFiles = data.task_files || [];
+    if (wsState.taskFiles.length > 0 && !wsState.selectedFile) {
+      wsState.selectedFile = wsState.taskFiles[0].path;
+    }
+    if (wsState.selectedFile) {
+      await wsLoadTasksFromFile(wsState.selectedFile);
+    }
+    const content = $('#ws-content');
+    if (content) content.innerHTML = wsRenderTaskArea();
+  } catch (e) {
+    const content = $('#ws-content');
+    if (content) content.innerHTML = `<div class="error-banner">Error loading tasks: ${e.message}</div>`;
+  }
+}
+
+async function wsLoadTasksFromFile(filePath) {
+  try {
+    const r = await fetch(`${API_BASE}/api/workspace/tasks-file?path=${encodeURIComponent(filePath)}`);
+    if (r.ok) {
+      const fileData = await r.json();
+      wsState.tasks = fileData.tasks || [];
+    } else {
+      wsState.tasks = [];
+    }
+  } catch (e) {
+    wsState.tasks = [];
+  }
+}
+
+function wsRenderTaskArea() {
+  let html = '';
+
+  // File tabs
+  if (wsState.taskFiles && wsState.taskFiles.length > 0) {
+    html += '<div class="ws-file-tabs">';
+    for (const tf of wsState.taskFiles) {
+      const isActive = wsState.selectedFile === tf.path;
+      html += `<button class="ws-file-tab ${isActive ? 'active' : ''}" onclick="wsSelectFile('${escapeHtml(tf.path)}')">${escapeHtml(tf.name)} <span class="file-count">(${tf.task_counts.total})</span></button>`;
+    }
+    html += '</div>';
+  }
+
+  // Task grid
+  if (wsState.tasks.length === 0) {
+    html += '<div class="ws-empty">No tasks in this file. Click "+ New Task" to create one.</div>';
+  } else {
+    html += '<div class="task-grid">';
+    for (const task of wsState.tasks) {
+      html += wsTaskCard(task);
+    }
+    html += '</div>';
+  }
+
+  return html;
+}
+
+function wsTaskCard(task) {
+  const agentTags = task.agents
+    ? task.agents.split(',').map(a => `<span class="tag tag-agent">${escapeHtml(a.trim())}</span>`).join('')
+    : '';
+  const skillTags = task.skills
+    ? task.skills.split(',').map(s => `<span class="tag tag-skill">${escapeHtml(s.trim())}</span>`).join('')
+    : '';
+  const hookBadge = task.hooks
+    ? `<span class="tag">${escapeHtml(task.hooks)}</span>`
+    : '';
+  const promptPreview = task.prompt
+    ? escapeHtml(task.prompt.substring(0, 100) + (task.prompt.length > 100 ? '...' : ''))
+    : '<em style="color:var(--text-dim)">No prompt</em>';
+  const taskId = escapeHtml(task.id);
+  const filePath = escapeHtml(wsState.selectedFile || '');
+
+  return `<div class="ws-task-card">
+    <div class="ws-task-header">
+      ${statusBadge(task.status)}
+      <span class="ws-task-name">${escapeHtml(task.name)}</span>
+      ${modelBadge(task.model)}
+    </div>
+    <div class="ws-task-tags">${agentTags}${skillTags}${hookBadge}</div>
+    <div class="ws-task-prompt">${promptPreview}</div>
+    <div class="ws-task-actions">
+      <button class="btn btn-sm btn-success" onclick="wsRunTask('${taskId}', '${filePath}')">Run</button>
+      <button class="btn btn-sm" onclick="wsEditTask('${taskId}')">Edit</button>
+      <button class="btn btn-sm btn-danger" onclick="wsDeleteTask('${taskId}', '${filePath}')">Delete</button>
+    </div>
+  </div>`;
+}
+
+async function wsSelectFile(filePath) {
+  wsState.selectedFile = filePath;
+  wsState.tasks = [];
+  await wsLoadTasksFromFile(filePath);
+  const content = $('#ws-content');
+  if (content) content.innerHTML = wsRenderTaskArea();
+}
+
+async function wsRunTask(taskId, filePath) {
+  if (!confirm(`Run task "${taskId}"?`)) return;
+  try {
+    const result = await api.runTask(taskId, filePath);
+    alert(`Task started! Run ID: ${result.run_id || 'unknown'}\nCheck the Runs tab for progress.`);
+  } catch (e) {
+    alert('Failed to run task: ' + e.message);
+  }
+}
+
+async function wsDeleteTask(taskId, filePath) {
+  if (!confirm(`Delete task "${taskId}"? This cannot be undone.`)) return;
+  try {
+    await api.deleteTask(taskId, filePath);
+    wsState.taskFiles = null;
+    await wsLoadRepoTasks(wsState.selectedRepo);
+  } catch (e) {
+    alert('Failed to delete task: ' + e.message);
+  }
+}
+
+async function wsEditTask(taskId) {
+  const task = wsState.tasks.find(t => t.id === taskId);
+  if (!task) { alert('Task not found'); return; }
+  wsShowTaskModal(task, false);
+}
+
+async function wsNewTask() {
+  if (!wsState.selectedRepo) { alert('Select a repository first'); return; }
+  wsShowTaskModal({
+    id: '',
+    name: '',
+    prompt: '',
+    model: 'opus',
+    workdir: wsState.selectedRepo,
+    agents: '',
+    skills: '',
+    hooks: 'standard',
+  }, true);
+}
+
+async function wsShowTaskModal(task, isNew) {
+  const existing = document.querySelector('.modal-overlay');
+  if (existing) existing.remove();
+
+  // Load agents and skills for checkboxes if not cached
+  if (!wsState.agents) {
+    try { wsState.agents = (await api.getAgents()).agents || []; } catch (_) { wsState.agents = []; }
+  }
+  if (!wsState.skills) {
+    try { wsState.skills = (await api.getSkills()).skills || []; } catch (_) { wsState.skills = []; }
+  }
+
+  const selectedAgents = new Set((task.agents || '').split(',').map(a => a.trim()).filter(Boolean));
+  const selectedSkills = new Set((task.skills || '').split(',').map(s => s.trim()).filter(Boolean));
+
+  const agentChecks = wsState.agents.map(a => {
+    const checked = selectedAgents.has(a.name);
+    return `<label class="ws-check ${checked ? 'checked' : ''}"><input type="checkbox" value="${escapeHtml(a.name)}" ${checked ? 'checked' : ''} onchange="this.parentElement.classList.toggle('checked',this.checked)">${escapeHtml(a.name)}</label>`;
+  }).join('');
+
+  const skillChecks = wsState.skills.map(s => {
+    const checked = selectedSkills.has(s.name);
+    return `<label class="ws-check ${checked ? 'checked' : ''}"><input type="checkbox" value="${escapeHtml(s.name)}" ${checked ? 'checked' : ''} onchange="this.parentElement.classList.toggle('checked',this.checked)">${escapeHtml(s.name)}</label>`;
+  }).join('');
+
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
+
+  overlay.innerHTML = `<div class="modal" style="max-width:750px">
+    <div class="modal-header">
+      <h3>${isNew ? 'New Task' : 'Edit Task: ' + escapeHtml(task.name)}</h3>
+      <button class="modal-close" onclick="this.closest('.modal-overlay').remove()">&times;</button>
+    </div>
+    <div class="modal-body">
+      <div class="form-group">
+        <label class="form-label">Name</label>
+        <input type="text" class="form-input" id="ws-modal-name" value="${escapeHtml(task.name)}" placeholder="Task name" ${!isNew ? 'readonly style="opacity:0.6"' : ''}>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Prompt</label>
+        <textarea class="form-textarea" id="ws-modal-prompt" style="min-height:150px">${escapeHtml(task.prompt || '')}</textarea>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px">
+        <div class="form-group">
+          <label class="form-label">Model</label>
+          <select class="form-input" id="ws-modal-model">
+            <option value="opus" ${task.model === 'opus' ? 'selected' : ''}>opus</option>
+            <option value="sonnet" ${task.model === 'sonnet' ? 'selected' : ''}>sonnet</option>
+            <option value="haiku" ${task.model === 'haiku' ? 'selected' : ''}>haiku</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Hooks</label>
+          <select class="form-input" id="ws-modal-hooks">
+            <option value="" ${!task.hooks ? 'selected' : ''}>none</option>
+            <option value="strict" ${task.hooks === 'strict' ? 'selected' : ''}>strict</option>
+            <option value="standard" ${task.hooks === 'standard' ? 'selected' : ''}>standard</option>
+            <option value="minimal" ${task.hooks === 'minimal' ? 'selected' : ''}>minimal</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Workdir</label>
+          <input type="text" class="form-input" id="ws-modal-workdir" value="${escapeHtml(task.workdir || wsState.selectedRepo || '')}" placeholder="/path/to/repo">
+        </div>
+      </div>
+      <div class="form-group">
+        <div class="ws-section-title">Agents ${agentChecks ? '' : '<span style="opacity:0.5">(none available)</span>'}</div>
+        <div class="ws-checks" id="ws-modal-agents">${agentChecks || '<span style="color:var(--text-dim);font-size:0.75rem">No agents found</span>'}</div>
+      </div>
+      <div class="form-group">
+        <div class="ws-section-title">Skills ${skillChecks ? '' : '<span style="opacity:0.5">(none available)</span>'}</div>
+        <div class="ws-checks" id="ws-modal-skills">${skillChecks || '<span style="color:var(--text-dim);font-size:0.75rem">No skills found</span>'}</div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn" onclick="this.closest('.modal-overlay').remove()">Cancel</button>
+      ${!isNew ? `<button class="btn btn-success" id="ws-modal-run">Save & Run</button>` : ''}
+      <button class="btn btn-primary" id="ws-modal-save">${isNew ? 'Create' : 'Save'}</button>
+    </div>
+  </div>`;
+
+  document.body.appendChild(overlay);
+  setTimeout(() => {
+    const focusEl = isNew ? overlay.querySelector('#ws-modal-name') : overlay.querySelector('#ws-modal-prompt');
+    if (focusEl) focusEl.focus();
+  }, 50);
+
+  const collectFormData = () => {
+    const name = overlay.querySelector('#ws-modal-name').value.trim();
+    const prompt = overlay.querySelector('#ws-modal-prompt').value;
+    const model = overlay.querySelector('#ws-modal-model').value;
+    const hooks = overlay.querySelector('#ws-modal-hooks').value;
+    const workdir = overlay.querySelector('#ws-modal-workdir').value.trim();
+    const agents = Array.from(overlay.querySelectorAll('#ws-modal-agents input:checked')).map(cb => cb.value).join(', ');
+    const skills = Array.from(overlay.querySelectorAll('#ws-modal-skills input:checked')).map(cb => cb.value).join(', ');
+    return { name, prompt, model, hooks, workdir, agents, skills };
+  };
+
+  const slugify = (str) => str.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+
+  overlay.querySelector('#ws-modal-save').onclick = async () => {
+    const form = collectFormData();
+    if (!form.name) { alert('Name is required'); return; }
+
+    const saveBtn = overlay.querySelector('#ws-modal-save');
+    saveBtn.textContent = 'Saving...';
+    saveBtn.disabled = true;
+
+    try {
+      const filePath = wsState.selectedFile || (wsState.selectedRepo + '/tasks.json');
+      if (isNew) {
+        const taskData = {
+          id: slugify(form.name),
+          name: form.name,
+          prompt: form.prompt,
+          model: form.model,
+          workdir: form.workdir,
+        };
+        if (form.agents) taskData.agents = form.agents;
+        if (form.skills) taskData.skills = form.skills;
+        if (form.hooks) taskData.hooks = form.hooks;
+        await api.createTask(filePath, taskData);
+      } else {
+        const fields = {
+          name: form.name,
+          prompt: form.prompt,
+          model: form.model,
+          workdir: form.workdir,
+          agents: form.agents,
+          skills: form.skills,
+          hooks: form.hooks,
+        };
+        await api.updateTask(task.id, filePath, fields);
+      }
+      overlay.remove();
+      wsState.taskFiles = null;
+      await wsLoadRepoTasks(wsState.selectedRepo);
+    } catch (e) {
+      alert('Save failed: ' + e.message);
+      saveBtn.textContent = isNew ? 'Create' : 'Save';
+      saveBtn.disabled = false;
+    }
+  };
+
+  // Save & Run button (edit mode only)
+  const runBtn = overlay.querySelector('#ws-modal-run');
+  if (runBtn) {
+    runBtn.onclick = async () => {
+      const form = collectFormData();
+      if (!form.name) { alert('Name is required'); return; }
+
+      runBtn.textContent = 'Saving...';
+      runBtn.disabled = true;
+
+      try {
+        const filePath = wsState.selectedFile || (wsState.selectedRepo + '/tasks.json');
+        const fields = {
+          name: form.name, prompt: form.prompt, model: form.model, workdir: form.workdir,
+          agents: form.agents, skills: form.skills, hooks: form.hooks,
+        };
+        await api.updateTask(task.id, filePath, fields);
+
+        runBtn.textContent = 'Running...';
+        const result = await api.runTask(task.id, filePath);
+        overlay.remove();
+        alert(`Task started! Run ID: ${result.run_id || 'unknown'}\nCheck the Runs tab.`);
+        wsState.taskFiles = null;
+        await wsLoadRepoTasks(wsState.selectedRepo);
+      } catch (e) {
+        alert('Failed: ' + e.message);
+        runBtn.textContent = 'Save & Run';
+        runBtn.disabled = false;
+      }
+    };
+  }
+
+  // Esc to close
+  const escHandler = (e) => {
+    if (e.key === 'Escape') { overlay.remove(); document.removeEventListener('keydown', escHandler); }
+  };
+  document.addEventListener('keydown', escHandler);
+}
+
+async function wsQuickRun() {
+  const prompt = $('#ws-qr-prompt');
+  const model = $('#ws-qr-model');
+  if (!prompt || !prompt.value.trim()) { alert('Enter a prompt'); return; }
+  if (!wsState.selectedRepo) { alert('Select a repository first'); return; }
+
+  const taskName = 'quick-' + Date.now().toString(36);
+  const filePath = wsState.selectedRepo + '/tasks.json';
+  const taskData = {
+    id: taskName,
+    name: taskName,
+    prompt: prompt.value.trim(),
+    model: model.value,
+    workdir: wsState.selectedRepo,
+  };
+
+  try {
+    await api.createTask(filePath, taskData);
+    const result = await api.runTask(taskName, filePath);
+    prompt.value = '';
+    alert(`Quick run started! Run ID: ${result.run_id || 'unknown'}\nCheck the Runs tab.`);
+    wsState.taskFiles = null;
+    await wsLoadRepoTasks(wsState.selectedRepo);
+  } catch (e) {
+    alert('Failed: ' + e.message);
+  }
+}
+
+// ── Pipelines Screen ──
+async function renderPipelinesScreen() {
+  const app = $('#app');
+  setBreadcrumb({ text: 'Pipelines' });
+  app.innerHTML = '<div class="loading">Loading pipelines...</div>';
+
+  try {
+    if (!cache.pipelines) cache.pipelines = await api.getPipelines();
+    const { pipelines } = cache.pipelines;
+
+    if (pipelines.length === 0) {
+      app.innerHTML = '<div style="color:var(--text-muted);font-family:var(--mono);padding:60px 0;text-align:center">No pipelines found</div>';
+      return;
+    }
+
+    let html = `<table class="pipeline-list-table"><thead><tr>
+      <th>Pipeline</th><th>Stages</th><th>Status</th><th>Cost</th>
+    </tr></thead><tbody>`;
+    for (const p of pipelines) {
+      const stagePills = p.stages.map(s =>
+        `<span class="stage-pill stage-pill-${s.status}">${s.name}</span>`
+      ).join('');
+      const totalCost = p.stages.reduce((sum, s) => sum + (s.cost_usd || 0), 0);
+      html += `<tr onclick="location.hash='#/pipeline/${p.id}'">
+        <td><span style="color:var(--text)">${p.name}</span> <span style="color:var(--text-dim);font-size:0.75rem">${formatDate(p.started_at_iso)} ${formatTime(p.started_at_iso)}</span></td>
+        <td><div class="stage-pills">${stagePills}</div></td>
+        <td>${statusBadge(p.status)}</td>
+        <td>${totalCost > 0 ? formatCost(totalCost) : '—'}</td>
+      </tr>`;
+    }
+    html += '</tbody></table>';
+    app.innerHTML = html;
+  } catch (e) {
+    app.innerHTML = `<div class="error-banner">Error: ${e.message}</div>`;
+  }
+}
+
+// ── Pipeline View (Train Visualization) ──
+let pipelineEventSource = null;
+let selectedTrainStage = null;
+
 async function renderPipelineView(pipelineId) {
   const app = $('#app');
-  setBreadcrumb({ text: 'Runs', href: '#/' }, { text: 'Pipeline' });
+  setBreadcrumb({ text: 'Pipelines', href: '#/pipelines' }, { text: 'Pipeline' });
   app.innerHTML = '<div class="loading">Loading pipeline...</div>';
+
+  // Clean up previous SSE connection
+  if (pipelineEventSource) {
+    pipelineEventSource.close();
+    pipelineEventSource = null;
+  }
+  selectedTrainStage = null;
 
   try {
     if (!cache.pipelineDetails[pipelineId]) {
@@ -775,101 +1792,246 @@ async function renderPipelineView(pipelineId) {
     }
     const pipeline = cache.pipelineDetails[pipelineId];
 
-    // Compute overall status
-    const statuses = pipeline.stages.map(s => s.status);
-    const overallStatus = statuses.includes('running') ? 'running'
-      : statuses.includes('failed') ? 'failed'
-      : statuses.every(s => s === 'done') ? 'done' : 'pending';
-
-    const totalCost = pipeline.stages.reduce((sum, s) => sum + (s.cost_usd || 0), 0);
-
     setBreadcrumb(
-      { text: 'Runs', href: '#/' },
+      { text: 'Pipelines', href: '#/pipelines' },
       { text: pipeline.name || pipelineId }
     );
 
-    let html = `<div class="pipeline-header">
-      <div style="display:flex;align-items:center;gap:12px;margin-bottom:8px">
-        <h2 style="margin:0">${pipeline.name || 'Pipeline'}</h2>
-        ${statusBadge(overallStatus)}
-      </div>
-      <div class="pipeline-meta">
-        <span>${formatDate(pipeline.started_at_iso)} ${formatTime(pipeline.started_at_iso)}</span>
-        <span>${pipeline.stages.length} stages</span>
-        ${totalCost > 0 ? `<span>total cost: <strong style="color:var(--text)">${formatCost(totalCost)}</strong></span>` : ''}
-      </div>
-    </div>`;
-
-    // Flow diagram
-    html += '<div class="pipeline-flow" id="pipeline-flow">';
-    pipeline.stages.forEach((stage, i) => {
-      const taskCount = stage.tasks ? stage.tasks.length : 0;
-      const doneCount = stage.tasks ? stage.tasks.filter(t => t.status === 'done').length : 0;
-      const failedCount = stage.tasks ? stage.tasks.filter(t => t.status === 'failed').length : 0;
-
-      if (i > 0) {
-        html += `<div class="pipeline-arrow">→</div>`;
-      }
-
-      const runLinks = (stage.run_ids || []).map(rid =>
-        `<a class="btn" href="#/run/${rid}" style="font-size:0.7rem;padding:3px 8px">View Run</a>`
-      ).join(' ');
-
-      const taskItems = (stage.tasks || []).map(t =>
-        `<div class="pipeline-task-item">
-          ${statusBadge(t.status)}
-          <a href="#/run/${t.run_id}/${t.id}/output" style="color:var(--text);font-size:0.75rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1">${t.name}</a>
-          ${t.cost_usd != null ? `<span style="color:var(--text-dim)">${formatCost(t.cost_usd)}</span>` : ''}
-        </div>`
-      ).join('');
-
-      html += `<div class="pipeline-stage-wrap">
-        <div class="pipeline-stage stage-${stage.status}" id="stage-${i}" onclick="toggleStage(${i})">
-          <div class="pipeline-stage-header">
-            <span class="pipeline-stage-num">Stage ${i + 1}</span>
-            ${statusBadge(stage.status)}
-          </div>
-          <div class="pipeline-stage-name">${stage.name}</div>
-          <div class="pipeline-stage-meta">${taskCount} tasks${doneCount ? ` · ${doneCount} done` : ''}${failedCount ? ` · ${failedCount} failed` : ''}</div>
-          ${stage.cost_usd != null ? `<div class="pipeline-stage-meta">${formatCost(stage.cost_usd)}</div>` : ''}
-          <div style="margin-top:8px;display:flex;gap:4px;flex-wrap:wrap">${runLinks}</div>
-          <div class="expand-hint">${taskCount > 0 ? '▸ Click to expand tasks' : ''}</div>
-          <div class="pipeline-task-list">${taskItems}</div>
-        </div>
-      </div>`;
-    });
-    html += '</div>';
-
-    // Pipeline config summary
-    html += `<details class="collapsible" style="margin-top:16px">
-      <summary>Pipeline Config</summary>
-      <div class="section-content">
-        <pre style="background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius);padding:14px;overflow-x:auto;font-size:0.8rem"><code class="language-json">${escapeHtml(JSON.stringify({
-          name: pipeline.name,
-          pipeline_file: pipeline.pipeline_file,
-          stages: pipeline.stages.map(s => ({
-            name: s.name,
-            status: s.status,
-            run_ids: s.run_ids,
-            task_files: s.task_files,
-            pass_outputs_to_next: s.pass_outputs_to_next
-          }))
-        }, null, 2))}</code></pre>
-      </div>
-    </details>`;
-
-    app.innerHTML = html;
-    if (window.hljs) {
-      app.querySelectorAll('pre code').forEach(b => hljs.highlightElement(b));
-    }
+    renderPipelineTrainDOM(app, pipeline, pipelineId);
+    connectPipelineSSE(pipelineId, app);
   } catch (e) {
     app.innerHTML = `<div class="error-banner">Error: ${e.message}</div>`;
   }
 }
 
-function toggleStage(idx) {
-  const el = document.getElementById(`stage-${idx}`);
-  if (el) el.classList.toggle('expanded');
+function renderPipelineTrainDOM(app, pipeline, pipelineId) {
+  const statuses = pipeline.stages.map(s => s.status);
+  const overallStatus = statuses.includes('running') ? 'running'
+    : statuses.includes('failed') ? 'failed'
+    : statuses.every(s => s === 'done') ? 'done' : 'pending';
+  const totalCost = pipeline.stages.reduce((sum, s) => sum + (s.cost_usd || 0), 0);
+
+  let html = `<div class="pipeline-header">
+    <div style="display:flex;align-items:center;gap:12px;margin-bottom:8px">
+      <h2 style="margin:0">${escapeHtml(pipeline.name || 'Pipeline')}</h2>
+      ${statusBadge(overallStatus)}
+    </div>
+    <div class="pipeline-meta">
+      <span>${formatDate(pipeline.started_at_iso)} ${formatTime(pipeline.started_at_iso)}</span>
+      <span>${pipeline.stages.length} stages</span>
+      ${totalCost > 0 ? `<span>total cost: <strong style="color:var(--text)">${formatCost(totalCost)}</strong></span>` : ''}
+    </div>
+  </div>`;
+
+  // Train visualization
+  html += '<div class="train-container" id="train-container">';
+  pipeline.stages.forEach((stage, i) => {
+    const taskCount = stage.tasks ? stage.tasks.length : 0;
+    const doneCount = stage.tasks ? stage.tasks.filter(t => t.status === 'done').length : 0;
+    const stageCost = stage.cost_usd || 0;
+
+    // Connector between cars
+    if (i > 0) {
+      const prevDone = pipeline.stages[i - 1].status === 'done';
+      html += `<div class="train-connector${prevDone ? ' active' : ''}" data-connector="${i}">
+        <div class="train-connector-line"><div class="train-connector-arrow"></div></div>
+      </div>`;
+    }
+
+    const selectedClass = selectedTrainStage === i ? ' selected' : '';
+    html += `<div class="train-car ${stage.status}${selectedClass}" data-stage="${i}" onclick="selectTrainStage(${i})">
+      <div class="train-car-header">
+        <span class="train-car-num">Stage ${i + 1}</span>
+        ${statusBadge(stage.status)}
+      </div>
+      <div class="train-car-name">${escapeHtml(stage.name)}</div>
+      <div class="train-car-stats">
+        <span>${taskCount} task${taskCount !== 1 ? 's' : ''}${doneCount > 0 && doneCount < taskCount ? ` (${doneCount} done)` : ''}</span>
+        ${stageCost > 0 ? `<span>${formatCost(stageCost)}</span>` : ''}
+      </div>
+      ${taskCount > 0 ? '<div class="train-car-expand">Click to view tasks</div>' : ''}
+    </div>`;
+  });
+  html += '</div>';
+
+  // Task breakdown panel placeholder
+  html += '<div id="train-tasks-panel"></div>';
+
+  // Pipeline config summary
+  html += `<details class="collapsible" style="margin-top:16px">
+    <summary>Pipeline Config</summary>
+    <div class="section-content">
+      <pre style="background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius);padding:14px;overflow-x:auto;font-size:0.8rem"><code class="language-json">${escapeHtml(JSON.stringify({
+        name: pipeline.name,
+        pipeline_file: pipeline.pipeline_file,
+        stages: pipeline.stages.map(s => ({
+          name: s.name,
+          status: s.status,
+          run_ids: s.run_ids,
+          task_files: s.task_files,
+          pass_outputs_to_next: s.pass_outputs_to_next
+        }))
+      }, null, 2))}</code></pre>
+    </div>
+  </details>`;
+
+  app.innerHTML = html;
+  if (window.hljs) {
+    app.querySelectorAll('pre code').forEach(b => hljs.highlightElement(b));
+  }
+
+  // Re-render task panel if a stage was selected
+  if (selectedTrainStage !== null) {
+    renderTrainTasksPanel(pipeline, selectedTrainStage);
+  }
+}
+
+function selectTrainStage(idx) {
+  const currentHash = location.hash;
+  const pipelineId = currentHash.match(/^#\/pipeline\/([^/]+)$/)?.[1];
+  if (!pipelineId) return;
+  const pipeline = cache.pipelineDetails[pipelineId];
+  if (!pipeline) return;
+
+  // Toggle selection
+  if (selectedTrainStage === idx) {
+    selectedTrainStage = null;
+    document.getElementById('train-tasks-panel').innerHTML = '';
+    document.querySelectorAll('.train-car').forEach(el => el.classList.remove('selected'));
+    return;
+  }
+
+  selectedTrainStage = idx;
+
+  // Update visual selection
+  document.querySelectorAll('.train-car').forEach(el => el.classList.remove('selected'));
+  const car = document.querySelector(`.train-car[data-stage="${idx}"]`);
+  if (car) car.classList.add('selected');
+
+  renderTrainTasksPanel(pipeline, idx);
+}
+
+function renderTrainTasksPanel(pipeline, stageIdx) {
+  const panel = document.getElementById('train-tasks-panel');
+  if (!panel) return;
+  const stage = pipeline.stages[stageIdx];
+  if (!stage) return;
+
+  const tasks = stage.tasks || [];
+  if (tasks.length === 0) {
+    panel.innerHTML = `<div class="train-tasks-panel">
+      <div class="train-tasks-header">
+        <h3>${escapeHtml(stage.name)}</h3>
+        ${statusBadge(stage.status)}
+      </div>
+      <div style="padding:16px;color:var(--text-muted);font-family:var(--mono);font-size:0.8rem">No tasks in this stage</div>
+    </div>`;
+    return;
+  }
+
+  const runLinks = (stage.run_ids || []).map(rid =>
+    `<a class="btn" href="#/run/${escapeHtml(rid)}" style="font-size:0.7rem;padding:3px 8px;margin-left:8px">View Run</a>`
+  ).join('');
+
+  let rows = '';
+  for (const t of tasks) {
+    const outputHref = t.run_id && t.id
+      ? `#/run/${escapeHtml(t.run_id)}/${escapeHtml(t.id)}/output`
+      : '';
+    rows += `<div class="train-task-row"${outputHref ? ` onclick="location.hash='${outputHref}'"` : ''}>
+      ${statusBadge(t.status)}
+      <span class="train-task-name">${escapeHtml(t.name)}</span>
+      ${t.cost_usd != null ? `<span class="train-task-cost">${formatCost(t.cost_usd)}</span>` : ''}
+      ${outputHref ? '<span class="train-task-link">View output</span>' : ''}
+    </div>`;
+  }
+
+  panel.innerHTML = `<div class="train-tasks-panel">
+    <div class="train-tasks-header">
+      <h3>${escapeHtml(stage.name)}</h3>
+      ${statusBadge(stage.status)}
+      ${stage.cost_usd != null ? `<span style="color:var(--text-muted);font-size:0.8rem;margin-left:auto">${formatCost(stage.cost_usd)}</span>` : ''}
+      ${runLinks}
+    </div>
+    <div class="train-tasks-list">${rows}</div>
+  </div>`;
+}
+
+function connectPipelineSSE(pipelineId, app) {
+  if (typeof EventSource === 'undefined') return;
+
+  try {
+    pipelineEventSource = new EventSource(`${API_BASE}/api/events`);
+
+    pipelineEventSource.onmessage = function(event) {
+      try {
+        const data = JSON.parse(event.data);
+        // Only handle events for this pipeline
+        if (data.pipeline_id !== pipelineId) return;
+
+        // Refresh pipeline data and re-render
+        cache.pipelineDetails[pipelineId] = null;
+        api.getPipeline(pipelineId).then(pipeline => {
+          cache.pipelineDetails[pipelineId] = pipeline;
+          // Only re-render if still on this pipeline view
+          if (location.hash === `#/pipeline/${pipelineId}`) {
+            renderPipelineTrainDOM(app, pipeline, pipelineId);
+          }
+        }).catch(() => {});
+      } catch (_) {}
+    };
+
+    pipelineEventSource.addEventListener('stage_update', function(event) {
+      try {
+        const data = JSON.parse(event.data);
+        if (data.pipeline_id !== pipelineId) return;
+        updateTrainCarStatus(data.stage_index, data.status);
+      } catch (_) {}
+    });
+
+    pipelineEventSource.addEventListener('task_update', function(event) {
+      try {
+        const data = JSON.parse(event.data);
+        if (data.pipeline_id !== pipelineId) return;
+        // Refresh full pipeline for task-level updates
+        cache.pipelineDetails[pipelineId] = null;
+        api.getPipeline(pipelineId).then(pipeline => {
+          cache.pipelineDetails[pipelineId] = pipeline;
+          if (location.hash === `#/pipeline/${pipelineId}`) {
+            renderPipelineTrainDOM(app, pipeline, pipelineId);
+          }
+        }).catch(() => {});
+      } catch (_) {}
+    });
+
+    pipelineEventSource.onerror = function() {
+      // Silently close on error; user can refresh
+      if (pipelineEventSource) {
+        pipelineEventSource.close();
+        pipelineEventSource = null;
+      }
+    };
+  } catch (_) {
+    // EventSource not supported or connection failed — non-fatal
+  }
+}
+
+function updateTrainCarStatus(stageIdx, newStatus) {
+  const car = document.querySelector(`.train-car[data-stage="${stageIdx}"]`);
+  if (!car) return;
+  car.classList.remove('pending', 'running', 'done', 'failed');
+  car.classList.add(newStatus);
+  // Update badge inside the car
+  const badge = car.querySelector('.badge');
+  if (badge) {
+    badge.className = `badge badge-${newStatus}`;
+    badge.textContent = newStatus.toUpperCase();
+  }
+  // Update connector to the right if stage is done
+  if (newStatus === 'done') {
+    const nextConnector = document.querySelector(`.train-connector[data-connector="${stageIdx + 1}"]`);
+    if (nextConnector) nextConnector.classList.add('active');
+  }
 }
 
 // ── Init ──

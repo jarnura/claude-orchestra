@@ -1,0 +1,27 @@
+{
+  "name": "ECC Config UI",
+  "description": "Build comprehensive ECC configuration UI with multiple screens",
+  "stages": [
+    {
+      "name": "Plan",
+      "tasks": [
+        {"file": "tasks/backend-api.json", "max_parallel": 3}
+      ],
+      "pass_outputs_to_next": true
+    },
+    {
+      "name": "Implement",
+      "tasks": [
+        {"file": "tasks/frontend-ui.json", "max_parallel": 4}
+      ],
+      "pass_outputs_to_next": true
+    },
+    {
+      "name": "Verify",
+      "tasks": [
+        {"file": "tasks/verify-features.json", "max_parallel": 3}
+      ]
+    }
+  ],
+  "aggregate": true
+}

@@ -1,0 +1,20 @@
+{
+  "tasks": [
+    {
+      "id": "complete-workspace-screen",
+      "name": "Complete Workspace Screen",
+      "prompt": "Implement the workspace screen in viewer/index.html.\n\nReplace the placeholder renderWorkspaceScreen() function with a full implementation.\n\nRequirements:\n1. Repo selector at top:\n   - Dropdown populated from /api/workspace/repos\n   - Shows repo name and path\n   - On select, load tasks for that repo\n\n2. Task list:\n   - Show tasks from selected repo's tasks.json files\n   - Display: name, status badge, agents/skills as tags\n   - Actions: Run, Edit, Delete buttons\n\n3. Task editor modal:\n   - Name, Prompt textarea\n   - Model dropdown (opus/sonnet/haiku)\n   - Agents checkboxes (from /api/config/agents)\n   - Skills checkboxes (from /api/config/skills)\n   - Hooks dropdown (strict/standard/minimal)\n   - Workdir field (auto-filled from repo)\n   - Save button (POST /api/workspace/tasks)\n   - Run button (POST then execute)\n\n4. Quick run panel:\n   - Prompt textarea\n   - Model dropdown\n   - Run button (creates and executes task)\n\n5. Add modal CSS for dialogs if not present\n\nEdit viewer/index.html to implement this. The function is at line ~1274.",
+      "status": "done",
+      "workdir": "/home/jarnura/projects/claude-orchestra",
+      "cost_usd": 1.5121364999999998
+    },
+    {
+      "id": "complete-pipeline-train",
+      "name": "Complete Pipeline Train Visualization",
+      "prompt": "Enhance the pipeline screen in viewer/index.html with train-style visualization.\n\nRequirements:\n1. Replace the renderPipelineView function with train visualization:\n   - Stages shown as connected boxes (train cars) left to right\n   - Each box: stage name, status badge, task count, cost\n   - Connection arrows between stages\n   - Animation for running stages (pulse effect)\n\n2. Task breakdown:\n   - Click stage to expand task list below\n   - Show task name, status, cost per task\n   - Click task to navigate to output\n\n3. CSS for train:\n   - .train-container for the row of stages\n   - .train-car for each stage box\n   - .train-connector for arrows between\n   - .train-car.running with pulse animation\n   - .train-car.done with green border\n   - .train-car.failed with red border\n\n4. Real-time updates:\n   - Connect to /api/events SSE endpoint\n   - Update stage status on events\n   - Use EventSource API\n\nEdit viewer/index.html. The renderPipelineView function starts around line 1318.",
+      "status": "done",
+      "workdir": "/home/jarnura/projects/claude-orchestra",
+      "cost_usd": 0.7352700000000001
+    }
+  ]
+}

@@ -12,22 +12,436 @@ orchestrator runs, task outputs, and execution timelines.
 import argparse
 import json
 import os
+import queue
 import re
+import subprocess
 import sys
+import tempfile
+import threading
+import time
+import uuid
 from datetime import datetime, timezone
-from http.server import BaseHTTPRequestHandler, HTTPServer
+from http.server import BaseHTTPRequestHandler, HTTPServer, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, unquote, urlparse
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 ORCHESTRA_DIR = SCRIPT_DIR.parent
 VIEWER_DIR = ORCHESTRA_DIR / "viewer"
+
+GLOBAL_CLAUDE_DIR = Path.home() / ".claude"
+PROJECT_CLAUDE_DIR = Path.cwd() / ".claude"
 
 # Matches old format (20260320-010801), new format (2026-03-20_01-08-01),
 # and custom names (my-feature-run). Prevents path traversal (no . or /).
 RUN_ID_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_-]*$")
 TASK_ID_RE = re.compile(r"^[a-z0-9][a-z0-9_-]*$")
 PIPELINE_ID_RE = re.compile(r"^[a-z0-9][a-z0-9_-]*$")
+CONFIG_NAME_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_-]*$")
+
+HOOK_PROFILES = {
+    "strict": {
+        "name": "strict",
+        "description": "All quality gates enabled — linting, type checking, formatting, security scans",
+    },
+    "standard": {
+        "name": "standard",
+        "description": "Balanced quality gates — linting and formatting, no security scans",
+    },
+    "minimal": {
+        "name": "minimal",
+        "description": "Minimal gates — formatting only",
+    },
+}
+
+# Workspace: directories to scan for repos
+WORKSPACE_SCAN_DIRS = [
+    Path.home() / "projects",
+    Path.home() / "repos",
+    Path.home() / "src",
+    Path.home() / "code",
+    Path.home() / "work",
+    Path.home() / "dev",
+]
+
+# Workspace task ID: allows uppercase too since user-defined tasks may use mixed case
+WORKSPACE_TASK_ID_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_-]*$")
+
+ORCHESTRA_BIN = SCRIPT_DIR / "orchestra"
+
+
+def _find_repos() -> list[dict]:
+    """Scan common directories for git repos (one level deep)."""
+    repos = []
+    seen = set()
+    for scan_dir in WORKSPACE_SCAN_DIRS:
+        if not scan_dir.is_dir():
+            continue
+        for entry in sorted(scan_dir.iterdir()):
+            if not entry.is_dir():
+                continue
+            resolved = entry.resolve()
+            if resolved in seen:
+                continue
+            seen.add(resolved)
+            git_dir = entry / ".git"
+            if git_dir.exists():
+                repos.append({
+                    "name": entry.name,
+                    "path": str(resolved),
+                    "has_git": True,
+                })
+    return repos
+
+
+def _find_task_files(repo_path: Path) -> list[dict]:
+    """Find tasks JSON files in a repo directory."""
+    results = []
+    if not repo_path.is_dir():
+        return results
+    # Check root-level JSON files
+    for f in sorted(repo_path.glob("*.json")):
+        if _is_tasks_file(f):
+            results.append(_task_file_summary(f))
+    # Check tasks/ subdirectory
+    tasks_dir = repo_path / "tasks"
+    if tasks_dir.is_dir():
+        for f in sorted(tasks_dir.glob("*.json")):
+            if _is_tasks_file(f):
+                results.append(_task_file_summary(f))
+    # Check pipelines/ subdirectory for task files
+    pipelines_dir = repo_path / "pipelines"
+    if pipelines_dir.is_dir():
+        for f in sorted(pipelines_dir.glob("*.json")):
+            if _is_tasks_file(f):
+                results.append(_task_file_summary(f))
+    return results
+
+
+def _is_tasks_file(f: Path) -> bool:
+    """Check if a JSON file contains a tasks array."""
+    try:
+        data = json.loads(f.read_text())
+        return isinstance(data.get("tasks"), list)
+    except Exception:
+        return False
+
+
+def _task_file_summary(f: Path) -> dict:
+    """Summarize a tasks file."""
+    try:
+        data = json.loads(f.read_text())
+        tasks = data.get("tasks", [])
+        counts = {"total": len(tasks), "pending": 0, "running": 0, "done": 0, "failed": 0}
+        for t in tasks:
+            st = t.get("status", "pending")
+            if st in counts:
+                counts[st] += 1
+        return {
+            "path": str(f),
+            "name": f.stem,
+            "task_counts": counts,
+        }
+    except Exception:
+        return {"path": str(f), "name": f.stem, "task_counts": {"total": 0}}
+
+
+def _load_tasks_file(file_path: Path) -> tuple[dict | None, str | None]:
+    """Load and validate a tasks JSON file. Returns (data, error_msg)."""
+    if not file_path.is_file():
+        return None, "Task file not found"
+    try:
+        data = json.loads(file_path.read_text())
+    except (json.JSONDecodeError, ValueError):
+        return None, "Invalid JSON in task file"
+    if not isinstance(data.get("tasks"), list):
+        return None, "Task file missing 'tasks' array"
+    return data, None
+
+
+def _save_tasks_file(file_path: Path, data: dict):
+    """Write tasks JSON file atomically via temp file."""
+    file_path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_fd, tmp_path = tempfile.mkstemp(
+        dir=str(file_path.parent), suffix=".json.tmp"
+    )
+    try:
+        with os.fdopen(tmp_fd, "w") as f:
+            json.dump(data, f, indent=2)
+            f.write("\n")
+        os.replace(tmp_path, str(file_path))
+    except Exception:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+        raise
+
+
+def _validate_workspace_path(raw_path: str) -> Path | None:
+    """Resolve and validate a workspace file path. Returns None if unsafe."""
+    try:
+        p = Path(raw_path).resolve()
+    except (ValueError, OSError):
+        return None
+    # Must be under home directory
+    home = Path.home().resolve()
+    if not str(p).startswith(str(home)):
+        return None
+    return p
+
+
+class SSEBroker:
+    """Manages connected SSE clients and broadcasts events."""
+
+    def __init__(self):
+        self._clients: list[queue.Queue] = []
+        self._lock = threading.Lock()
+
+    def subscribe(self) -> queue.Queue:
+        q = queue.Queue(maxsize=256)
+        with self._lock:
+            self._clients.append(q)
+        return q
+
+    def unsubscribe(self, q: queue.Queue):
+        with self._lock:
+            try:
+                self._clients.remove(q)
+            except ValueError:
+                pass
+
+    def broadcast(self, event_type: str, data: dict):
+        msg = f"event: {event_type}\ndata: {json.dumps(data, default=str)}\n\n"
+        with self._lock:
+            for q in list(self._clients):
+                try:
+                    q.put_nowait(msg)
+                except queue.Full:
+                    pass
+
+
+class LogWatcher(threading.Thread):
+    """Watches logs directory for state changes and stream updates."""
+
+    def __init__(self, logs_dir: Path, broker: SSEBroker):
+        super().__init__(daemon=True)
+        self._logs_dir = logs_dir
+        self._broker = broker
+        self._stop_event = threading.Event()
+        self._run_states: dict[str, dict[str, str]] = {}
+        self._stream_positions: dict[str, int] = {}
+        self._pipeline_states: dict[str, dict[int, str]] = {}
+        self._snapshot()
+
+    def _snapshot(self):
+        """Capture initial state without emitting events."""
+        if not self._logs_dir.is_dir():
+            return
+        for run_dir in self._logs_dir.iterdir():
+            if not run_dir.is_dir():
+                continue
+            state_file = run_dir / "state.json"
+            if not state_file.exists():
+                continue
+            try:
+                state = json.loads(state_file.read_text())
+            except Exception:
+                continue
+            tasks = state.get("tasks", [])
+            self._run_states[run_dir.name] = {
+                t["id"]: t.get("status", "pending") for t in tasks
+            }
+            for t in tasks:
+                stream_f = run_dir / f"{t['id']}.stream.jsonl"
+                if stream_f.exists():
+                    try:
+                        self._stream_positions[str(stream_f)] = stream_f.stat().st_size
+                    except OSError:
+                        pass
+        for f in self._logs_dir.glob("*.json"):
+            if f.parent != self._logs_dir:
+                continue
+            try:
+                data = json.loads(f.read_text())
+                if not isinstance(data.get("stages"), list):
+                    continue
+                self._pipeline_states[data["id"]] = {
+                    i: s.get("status", "pending")
+                    for i, s in enumerate(data["stages"])
+                }
+            except Exception:
+                continue
+
+    def stop(self):
+        self._stop_event.set()
+
+    def run(self):
+        while not self._stop_event.is_set():
+            try:
+                self._poll()
+            except Exception:
+                pass
+            self._stop_event.wait(timeout=1.0)
+
+    def _poll(self):
+        if not self._logs_dir.is_dir():
+            return
+        self._poll_runs()
+        self._poll_pipelines()
+
+    def _poll_runs(self):
+        for run_dir in self._logs_dir.iterdir():
+            if not run_dir.is_dir():
+                continue
+            state_file = run_dir / "state.json"
+            if not state_file.exists():
+                continue
+            run_id = run_dir.name
+            try:
+                state = json.loads(state_file.read_text())
+            except Exception:
+                continue
+            tasks = state.get("tasks", [])
+            old_states = self._run_states.get(run_id, {})
+            new_states = {}
+
+            if run_id not in self._run_states:
+                self._broker.broadcast("run_started", {
+                    "run_id": run_id,
+                    "task_count": len(tasks),
+                    "started_at": state.get("started_at"),
+                })
+
+            for t in tasks:
+                tid = t["id"]
+                status = t.get("status", "pending")
+                new_states[tid] = status
+                old_status = old_states.get(tid)
+
+                if old_status == status:
+                    continue
+                if status == "running" and old_status != "running":
+                    self._broker.broadcast("task_started", {
+                        "run_id": run_id,
+                        "task_id": tid,
+                        "task_name": t.get("name", tid),
+                    })
+                elif status in ("done", "failed"):
+                    self._broker.broadcast("task_completed", {
+                        "run_id": run_id,
+                        "task_id": tid,
+                        "task_name": t.get("name", tid),
+                        "status": status,
+                        "cost_usd": t.get("cost_usd"),
+                    })
+
+            self._run_states[run_id] = new_states
+
+            # Emit run_progress on any task status change
+            if old_states and new_states != old_states:
+                done = sum(1 for s in new_states.values() if s == "done")
+                failed = sum(1 for s in new_states.values() if s == "failed")
+                running = sum(1 for s in new_states.values() if s == "running")
+                self._broker.broadcast("run_progress", {
+                    "run_id": run_id,
+                    "tasks_done": done,
+                    "tasks_failed": failed,
+                    "tasks_running": running,
+                    "tasks_total": len(new_states),
+                })
+
+            # Emit run_completed when all tasks reach terminal state
+            all_terminal = new_states and all(
+                s in ("done", "failed") for s in new_states.values()
+            )
+            was_terminal = old_states and all(
+                s in ("done", "failed") for s in old_states.values()
+            )
+            if all_terminal and not was_terminal:
+                done = sum(1 for s in new_states.values() if s == "done")
+                failed = sum(1 for s in new_states.values() if s == "failed")
+                self._broker.broadcast("run_completed", {
+                    "run_id": run_id,
+                    "tasks_done": done,
+                    "tasks_failed": failed,
+                })
+
+            # Watch stream files for running tasks
+            for t in tasks:
+                if t.get("status") != "running":
+                    continue
+                stream_f = run_dir / f"{t['id']}.stream.jsonl"
+                if stream_f.exists():
+                    self._poll_stream(run_id, t["id"], stream_f)
+
+    def _poll_stream(self, run_id: str, task_id: str, stream_f: Path):
+        key = str(stream_f)
+        pos = self._stream_positions.get(key, 0)
+        try:
+            size = stream_f.stat().st_size
+            if size <= pos:
+                return
+            with open(stream_f, "r", errors="replace") as f:
+                f.seek(pos)
+                new_data = f.read()
+                self._stream_positions[key] = f.tell()
+
+            for line in new_data.strip().split("\n"):
+                if not line.strip():
+                    continue
+                try:
+                    ev = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if ev.get("type") == "system" and ev.get("subtype") == "task_progress":
+                    self._broker.broadcast("task_progress", {
+                        "run_id": run_id,
+                        "task_id": task_id,
+                        "description": ev.get("description", ""),
+                        "tool_name": ev.get("last_tool_name"),
+                        "duration_ms": ev.get("usage", {}).get("duration_ms"),
+                    })
+        except OSError:
+            pass
+
+    def _poll_pipelines(self):
+        for f in self._logs_dir.glob("*.json"):
+            if f.parent != self._logs_dir:
+                continue
+            try:
+                data = json.loads(f.read_text())
+                if not isinstance(data.get("stages"), list):
+                    continue
+                pid = data["id"]
+                stages = data["stages"]
+                old_stages = self._pipeline_states.get(pid, {})
+                new_stages = {}
+
+                for i, stage in enumerate(stages):
+                    status = stage.get("status", "pending")
+                    new_stages[i] = status
+                    old_status = old_stages.get(i)
+
+                    if old_status == status:
+                        continue
+                    if status == "running":
+                        self._broker.broadcast("stage_started", {
+                            "pipeline_id": pid,
+                            "stage_index": i,
+                            "stage_name": stage.get("name", f"Stage {i}"),
+                        })
+                    elif status in ("done", "failed"):
+                        self._broker.broadcast("stage_completed", {
+                            "pipeline_id": pid,
+                            "stage_index": i,
+                            "stage_name": stage.get("name", f"Stage {i}"),
+                            "status": status,
+                        })
+
+                self._pipeline_states[pid] = new_stages
+            except Exception:
+                continue
 
 
 def _summarize_tool(tool: str, inp: dict) -> str:
@@ -224,6 +638,7 @@ def _parse_stream(stream_path: Path) -> dict:
 
 class OrchestraHandler(BaseHTTPRequestHandler):
     logs_dir: Path = Path(".")
+    broker: SSEBroker = None
 
     def do_GET(self):
         parsed = urlparse(self.path)
@@ -245,8 +660,72 @@ class OrchestraHandler(BaseHTTPRequestHandler):
             self._api_pipelines()
         elif m := re.match(r"^/api/pipeline/([^/]+)$", path):
             self._api_pipeline_detail(m.group(1))
+        elif path == "/api/config/paths":
+            self._api_config_paths()
+        elif path == "/api/config/agents":
+            self._api_config_agents_list()
+        elif m := re.match(r"^/api/config/agents/([^/]+)$", path):
+            self._api_config_agent_get(m.group(1))
+        elif path == "/api/config/skills":
+            self._api_config_skills_list()
+        elif m := re.match(r"^/api/config/skills/([^/]+)$", path):
+            self._api_config_skill_get(m.group(1))
+        elif path == "/api/config/hooks":
+            self._api_config_hooks_list()
+        elif path == "/api/events":
+            self._api_events()
+        elif path == "/api/workspace/repos":
+            self._api_workspace_repos()
+        elif m := re.match(r"^/api/workspace/repos/(.+)/tasks$", path):
+            self._api_workspace_repo_tasks(unquote(m.group(1)))
+        elif path == "/api/workspace/tasks-file":
+            self._api_workspace_tasks_file()
         else:
             self._not_found()
+
+    def do_POST(self):
+        parsed = urlparse(self.path)
+        path = parsed.path.rstrip("/")
+
+        if path == "/api/workspace/tasks":
+            self._api_workspace_task_create()
+        elif m := re.match(r"^/api/workspace/tasks/([^/]+)/run$", path):
+            self._api_workspace_task_run(m.group(1))
+        else:
+            self._not_found()
+
+    def do_PUT(self):
+        parsed = urlparse(self.path)
+        path = parsed.path.rstrip("/")
+
+        if m := re.match(r"^/api/config/agents/([^/]+)$", path):
+            self._api_config_agent_put(m.group(1))
+        elif m := re.match(r"^/api/config/skills/([^/]+)$", path):
+            self._api_config_skill_put(m.group(1))
+        elif m := re.match(r"^/api/workspace/tasks/([^/]+)$", path):
+            self._api_workspace_task_update(m.group(1))
+        else:
+            self._not_found()
+
+    def do_DELETE(self):
+        parsed = urlparse(self.path)
+        path = parsed.path.rstrip("/")
+
+        if m := re.match(r"^/api/config/agents/([^/]+)$", path):
+            self._api_config_agent_delete(m.group(1))
+        elif m := re.match(r"^/api/config/skills/([^/]+)$", path):
+            self._api_config_skill_delete(m.group(1))
+        elif m := re.match(r"^/api/workspace/tasks/([^/]+)$", path):
+            self._api_workspace_task_delete(m.group(1))
+        else:
+            self._not_found()
+
+    def do_OPTIONS(self):
+        self.send_response(204)
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type")
+        self.end_headers()
 
     def _validate_ids(self, run_id, task_id=None):
         if not RUN_ID_RE.match(run_id):
@@ -483,6 +962,465 @@ class OrchestraHandler(BaseHTTPRequestHandler):
             "stages": stages,
         })
 
+    # ── SSE endpoint ───────────────────────────────────────────────────
+
+    def _api_events(self):
+        if self.broker is None:
+            self._error(503, "SSE not available")
+            return
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream")
+        self.send_header("Cache-Control", "no-cache")
+        self.send_header("Connection", "keep-alive")
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.end_headers()
+
+        client_q = self.broker.subscribe()
+        try:
+            while True:
+                try:
+                    msg = client_q.get(timeout=15)
+                    self.wfile.write(msg.encode())
+                    self.wfile.flush()
+                except queue.Empty:
+                    self.wfile.write(b": heartbeat\n\n")
+                    self.wfile.flush()
+        except (BrokenPipeError, ConnectionResetError, OSError):
+            pass
+        finally:
+            self.broker.unsubscribe(client_q)
+
+    # ── Config API helpers ──────────────────────────────────────────────
+
+    def _read_body_json(self):
+        """Read and parse JSON request body. Returns dict or None on error."""
+        length = int(self.headers.get("Content-Length", 0))
+        if length == 0:
+            self._error(400, "Empty request body")
+            return None
+        raw = self.rfile.read(length)
+        try:
+            return json.loads(raw)
+        except (json.JSONDecodeError, ValueError):
+            self._error(400, "Invalid JSON")
+            return None
+
+    def _collect_agents(self, base_dir: Path, scope: str) -> list:
+        """List agent .md files under base_dir/agents/."""
+        agents_dir = base_dir / "agents"
+        if not agents_dir.is_dir():
+            return []
+        results = []
+        for f in sorted(agents_dir.iterdir()):
+            if f.is_file() and f.suffix == ".md":
+                results.append({
+                    "name": f.stem,
+                    "scope": scope,
+                    "path": str(f),
+                })
+        return results
+
+    def _collect_skills(self, base_dir: Path, scope: str) -> list:
+        """List skills under base_dir/skills/ (each has SKILL.md)."""
+        skills_dir = base_dir / "skills"
+        if not skills_dir.is_dir():
+            return []
+        results = []
+        for d in sorted(skills_dir.iterdir()):
+            skill_file = d / "SKILL.md"
+            if d.is_dir() and skill_file.exists():
+                results.append({
+                    "name": d.name,
+                    "scope": scope,
+                    "path": str(skill_file),
+                })
+        return results
+
+    # ── Config API routes ──────────────────────────────────────────────
+
+    def _api_config_paths(self):
+        self._json({
+            "global_path": str(GLOBAL_CLAUDE_DIR),
+            "project_path": str(PROJECT_CLAUDE_DIR),
+        })
+
+    def _api_config_agents_list(self):
+        agents = (
+            self._collect_agents(GLOBAL_CLAUDE_DIR, "global")
+            + self._collect_agents(PROJECT_CLAUDE_DIR, "project")
+        )
+        self._json({"agents": agents})
+
+    def _api_config_agent_get(self, name: str):
+        if not CONFIG_NAME_RE.match(name):
+            self._error(400, "Invalid agent name")
+            return
+        for base, scope in [(PROJECT_CLAUDE_DIR, "project"), (GLOBAL_CLAUDE_DIR, "global")]:
+            agent_file = base / "agents" / f"{name}.md"
+            if agent_file.is_file():
+                self._json({
+                    "name": name,
+                    "scope": scope,
+                    "content": agent_file.read_text(errors="replace"),
+                })
+                return
+        self._not_found()
+
+    def _api_config_agent_put(self, name: str):
+        if not CONFIG_NAME_RE.match(name):
+            self._error(400, "Invalid agent name")
+            return
+        body = self._read_body_json()
+        if body is None:
+            return
+        scope = body.get("scope", "project")
+        content = body.get("content")
+        if content is None:
+            self._error(400, "Missing 'content' field")
+            return
+        if scope not in ("global", "project"):
+            self._error(400, "scope must be 'global' or 'project'")
+            return
+        base = GLOBAL_CLAUDE_DIR if scope == "global" else PROJECT_CLAUDE_DIR
+        agents_dir = base / "agents"
+        agents_dir.mkdir(parents=True, exist_ok=True)
+        agent_file = agents_dir / f"{name}.md"
+        created = not agent_file.exists()
+        agent_file.write_text(content)
+        self._json_status(201 if created else 200, {
+            "name": name,
+            "scope": scope,
+            "path": str(agent_file),
+        })
+
+    def _api_config_agent_delete(self, name: str):
+        if not CONFIG_NAME_RE.match(name):
+            self._error(400, "Invalid agent name")
+            return
+        for base in [PROJECT_CLAUDE_DIR, GLOBAL_CLAUDE_DIR]:
+            agent_file = base / "agents" / f"{name}.md"
+            if agent_file.is_file():
+                agent_file.unlink()
+                self._json({"deleted": name})
+                return
+        self._not_found()
+
+    def _api_config_skills_list(self):
+        skills = (
+            self._collect_skills(GLOBAL_CLAUDE_DIR, "global")
+            + self._collect_skills(PROJECT_CLAUDE_DIR, "project")
+        )
+        self._json({"skills": skills})
+
+    def _api_config_skill_get(self, name: str):
+        if not CONFIG_NAME_RE.match(name):
+            self._error(400, "Invalid skill name")
+            return
+        for base, scope in [(PROJECT_CLAUDE_DIR, "project"), (GLOBAL_CLAUDE_DIR, "global")]:
+            skill_file = base / "skills" / name / "SKILL.md"
+            if skill_file.is_file():
+                self._json({
+                    "name": name,
+                    "scope": scope,
+                    "content": skill_file.read_text(errors="replace"),
+                })
+                return
+        self._not_found()
+
+    def _api_config_skill_put(self, name: str):
+        if not CONFIG_NAME_RE.match(name):
+            self._error(400, "Invalid skill name")
+            return
+        body = self._read_body_json()
+        if body is None:
+            return
+        scope = body.get("scope", "project")
+        content = body.get("content")
+        if content is None:
+            self._error(400, "Missing 'content' field")
+            return
+        if scope not in ("global", "project"):
+            self._error(400, "scope must be 'global' or 'project'")
+            return
+        base = GLOBAL_CLAUDE_DIR if scope == "global" else PROJECT_CLAUDE_DIR
+        skill_dir = base / "skills" / name
+        skill_dir.mkdir(parents=True, exist_ok=True)
+        skill_file = skill_dir / "SKILL.md"
+        created = not skill_file.exists()
+        skill_file.write_text(content)
+        self._json_status(201 if created else 200, {
+            "name": name,
+            "scope": scope,
+            "path": str(skill_file),
+        })
+
+    def _api_config_skill_delete(self, name: str):
+        if not CONFIG_NAME_RE.match(name):
+            self._error(400, "Invalid skill name")
+            return
+        for base in [PROJECT_CLAUDE_DIR, GLOBAL_CLAUDE_DIR]:
+            skill_file = base / "skills" / name / "SKILL.md"
+            if skill_file.is_file():
+                skill_file.unlink()
+                # Remove the directory if now empty
+                skill_dir = skill_file.parent
+                try:
+                    skill_dir.rmdir()
+                except OSError:
+                    pass
+                self._json({"deleted": name})
+                return
+        self._not_found()
+
+    def _api_config_hooks_list(self):
+        self._json({"hooks": list(HOOK_PROFILES.values())})
+
+    # ── Workspace API routes ──────────────────────────────────────────
+
+    def _api_workspace_repos(self):
+        """GET /api/workspace/repos — list available repos."""
+        repos = _find_repos()
+        self._json({"repos": repos})
+
+    def _api_workspace_repo_tasks(self, raw_path: str):
+        """GET /api/workspace/repos/{path}/tasks — list task files in a repo."""
+        # Prepend / if the path doesn't start with one (URL encoding strips it)
+        if not raw_path.startswith("/"):
+            raw_path = "/" + raw_path
+        repo_path = _validate_workspace_path(raw_path)
+        if repo_path is None:
+            self._error(400, "Invalid repo path")
+            return
+        if not repo_path.is_dir():
+            self._not_found()
+            return
+        task_files = _find_task_files(repo_path)
+        self._json({"repo": str(repo_path), "task_files": task_files})
+
+    def _api_workspace_tasks_file(self):
+        """GET /api/workspace/tasks-file?path=... — read tasks from a file."""
+        parsed = urlparse(self.path)
+        qs = parse_qs(parsed.query)
+        path_list = qs.get("path", [])
+        if not path_list:
+            self._error(400, "Missing 'path' query parameter")
+            return
+        file_path = _validate_workspace_path(path_list[0])
+        if file_path is None:
+            self._error(400, "Invalid file path")
+            return
+        data, err = _load_tasks_file(file_path)
+        if err:
+            self._error(400, err)
+            return
+        self._json({"tasks": data.get("tasks", []), "file": str(file_path)})
+
+    def _api_workspace_task_create(self):
+        """POST /api/workspace/tasks — create a task in a task file."""
+        body = self._read_body_json()
+        if body is None:
+            return
+        file_path_str = body.get("file")
+        task_data = body.get("task")
+        if not file_path_str:
+            self._error(400, "Missing 'file' field (path to tasks.json)")
+            return
+        if not task_data or not isinstance(task_data, dict):
+            self._error(400, "Missing or invalid 'task' object")
+            return
+        task_id = task_data.get("id")
+        if not task_id or not WORKSPACE_TASK_ID_RE.match(task_id):
+            self._error(400, "Missing or invalid task 'id'")
+            return
+        if not task_data.get("name"):
+            self._error(400, "Missing task 'name'")
+            return
+
+        file_path = _validate_workspace_path(file_path_str)
+        if file_path is None:
+            self._error(400, "Invalid file path")
+            return
+
+        # Load existing file or create new
+        if file_path.is_file():
+            data, err = _load_tasks_file(file_path)
+            if err:
+                self._error(400, err)
+                return
+        else:
+            data = {"tasks": []}
+
+        # Check for duplicate ID
+        for t in data["tasks"]:
+            if t.get("id") == task_id:
+                self._error(409, f"Task '{task_id}' already exists")
+                return
+
+        # Build task with defaults
+        new_task = {
+            "id": task_id,
+            "name": task_data["name"],
+            "prompt": task_data.get("prompt", ""),
+            "workdir": task_data.get("workdir", ""),
+            "model": task_data.get("model", "opus"),
+            "status": "pending",
+        }
+        # Optional fields
+        for field in ("agents", "skills", "hooks", "effort", "allowedTools", "appendSystemPrompt"):
+            if field in task_data:
+                new_task[field] = task_data[field]
+
+        data["tasks"].append(new_task)
+        _save_tasks_file(file_path, data)
+        self._json_status(201, {"task": new_task, "file": str(file_path)})
+
+    def _api_workspace_task_update(self, task_id: str):
+        """PUT /api/workspace/tasks/{id} — update a task."""
+        if not WORKSPACE_TASK_ID_RE.match(task_id):
+            self._error(400, "Invalid task ID")
+            return
+        parsed = urlparse(self.path)
+        qs = parse_qs(parsed.query)
+        file_list = qs.get("file", [])
+        if not file_list:
+            self._error(400, "Missing 'file' query parameter")
+            return
+        file_path = _validate_workspace_path(file_list[0])
+        if file_path is None:
+            self._error(400, "Invalid file path")
+            return
+
+        data, err = _load_tasks_file(file_path)
+        if err:
+            self._error(400, err)
+            return
+
+        body = self._read_body_json()
+        if body is None:
+            return
+
+        # Find and update the task
+        for i, t in enumerate(data["tasks"]):
+            if t.get("id") == task_id:
+                updated = dict(t)
+                # Update allowed fields
+                for field in ("name", "prompt", "workdir", "model", "status",
+                              "agents", "skills", "hooks", "effort",
+                              "allowedTools", "appendSystemPrompt"):
+                    if field in body:
+                        updated[field] = body[field]
+                # Don't allow changing the ID
+                updated["id"] = task_id
+                data["tasks"][i] = updated
+                _save_tasks_file(file_path, data)
+                self._json({"task": updated, "file": str(file_path)})
+                return
+
+        self._not_found()
+
+    def _api_workspace_task_delete(self, task_id: str):
+        """DELETE /api/workspace/tasks/{id} — remove a task from a task file."""
+        if not WORKSPACE_TASK_ID_RE.match(task_id):
+            self._error(400, "Invalid task ID")
+            return
+        parsed = urlparse(self.path)
+        qs = parse_qs(parsed.query)
+        file_list = qs.get("file", [])
+        if not file_list:
+            self._error(400, "Missing 'file' query parameter")
+            return
+        file_path = _validate_workspace_path(file_list[0])
+        if file_path is None:
+            self._error(400, "Invalid file path")
+            return
+
+        data, err = _load_tasks_file(file_path)
+        if err:
+            self._error(400, err)
+            return
+
+        original_len = len(data["tasks"])
+        data["tasks"] = [t for t in data["tasks"] if t.get("id") != task_id]
+        if len(data["tasks"]) == original_len:
+            self._not_found()
+            return
+
+        _save_tasks_file(file_path, data)
+        self._json({"deleted": task_id, "file": str(file_path)})
+
+    def _api_workspace_task_run(self, task_id: str):
+        """POST /api/workspace/tasks/{id}/run — execute a task via orchestra."""
+        if not WORKSPACE_TASK_ID_RE.match(task_id):
+            self._error(400, "Invalid task ID")
+            return
+        body = self._read_body_json()
+        if body is None:
+            return
+        file_path_str = body.get("file")
+        if not file_path_str:
+            self._error(400, "Missing 'file' field")
+            return
+        file_path = _validate_workspace_path(file_path_str)
+        if file_path is None:
+            self._error(400, "Invalid file path")
+            return
+
+        data, err = _load_tasks_file(file_path)
+        if err:
+            self._error(400, err)
+            return
+
+        # Find the task
+        task = None
+        for t in data["tasks"]:
+            if t.get("id") == task_id:
+                task = t
+                break
+        if task is None:
+            self._not_found()
+            return
+
+        # Create a temp tasks file with just this task
+        run_id = datetime.now().strftime("%Y-%m-%d_%H-%M-%S") + "-" + uuid.uuid4().hex[:6]
+        tmp_dir = tempfile.mkdtemp(prefix="orchestra-run-")
+        tmp_tasks = Path(tmp_dir) / "tasks.json"
+        single_data = {"tasks": [{**task, "status": "pending"}]}
+        tmp_tasks.write_text(json.dumps(single_data, indent=2) + "\n")
+
+        # Determine workdir for the subprocess
+        workdir = task.get("workdir", "")
+        cwd = workdir if workdir and Path(workdir).is_dir() else str(ORCHESTRA_DIR)
+
+        # Spawn orchestra in the background
+        log_dir = self.logs_dir / run_id
+        cmd = [str(ORCHESTRA_BIN), "--name", run_id, str(tmp_tasks)]
+        env = {**os.environ, "LOG_DIR": str(log_dir)}
+        try:
+            subprocess.Popen(
+                cmd,
+                cwd=cwd,
+                env=env,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                start_new_session=True,
+            )
+        except OSError as e:
+            self._error(500, f"Failed to spawn orchestra: {e}")
+            return
+
+        self._json_status(202, {"run_id": run_id, "task_id": task_id})
+
+    # ── Response helpers ───────────────────────────────────────────────
+
+    def _json_status(self, status: int, data):
+        body = json.dumps(data, default=str).encode()
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.end_headers()
+        self.wfile.write(body)
+
     def _json(self, data):
         body = json.dumps(data, default=str).encode()
         self.send_response(200)
@@ -509,6 +1447,7 @@ class OrchestraHandler(BaseHTTPRequestHandler):
         self.send_response(404)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body)))
+        self.send_header("Access-Control-Allow-Origin", "*")
         self.end_headers()
         self.wfile.write(body)
 
@@ -517,6 +1456,7 @@ class OrchestraHandler(BaseHTTPRequestHandler):
         self.send_response(code)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body)))
+        self.send_header("Access-Control-Allow-Origin", "*")
         self.end_headers()
         self.wfile.write(body)
 
@@ -549,16 +1489,24 @@ def main():
 
     OrchestraHandler.logs_dir = logs_dir
 
-    server = HTTPServer((args.host, args.port), OrchestraHandler)
+    broker = SSEBroker()
+    OrchestraHandler.broker = broker
+
+    watcher = LogWatcher(logs_dir, broker)
+    watcher.start()
+
+    server = ThreadingHTTPServer((args.host, args.port), OrchestraHandler)
     url = f"http://{args.host}:{args.port}"
     print(f"\033[35mclaude-orchestra viewer\033[0m")
     print(f"  URL:      \033[34m{url}\033[0m")
     print(f"  Logs dir: \033[34m{logs_dir}\033[0m")
+    print(f"  SSE:      \033[34m{url}/api/events\033[0m")
     print(f"  Ctrl+C to stop")
     try:
         server.serve_forever()
     except KeyboardInterrupt:
         print("\nShutting down.")
+        watcher.stop()
         server.server_close()
 
 
