@@ -143,7 +143,8 @@ write_state() {
             agents: (.agents // null),
             skills: (.skills // null),
             hooks: (.hooks // null),
-            cost_usd: (.cost_usd // null)
+            cost_usd: (.cost_usd // null),
+            workdir: (.workdir // null)
         }]
     }' "$TASKS_FILE" > "$LOG_DIR/state.json" 2>/dev/null || true
 }

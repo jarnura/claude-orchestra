@@ -65,6 +65,7 @@ main { max-width: 1200px; margin: 0 auto; padding: 24px; }
 .search-box:focus { border-color: var(--accent); }
 .search-box::placeholder { color: var(--text-dim); }
 
+
 .runs-table { width: 100%; border-collapse: collapse; }
 .runs-table th { text-align: left; padding: 8px 12px; color: var(--text-muted); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; border-bottom: 1px solid var(--border); font-weight: 500; }
 .runs-table td { padding: 10px 12px; border-bottom: 1px solid var(--border); font-family: var(--mono); font-size: 0.85rem; }
@@ -334,12 +335,102 @@ pre:hover .copy-btn { opacity: 1; }
 .ws-tasks-md-actions { display: flex; gap: 8px; margin-top: 8px; }
 .ws-brainstorm.loading button { opacity: 0.6; pointer-events: none; }
 .ws-empty { text-align: center; color: var(--text-muted); padding: 40px; font-family: var(--mono); font-size: 0.85rem; }
+/* Active runs panel */
+.ws-active-runs { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 16px; margin-bottom: 20px; }
+.ws-active-runs h3 { margin: 0 0 12px 0; font-size: 1rem; color: var(--text); }
+.ws-run-row { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 6px; background: var(--bg); border: 1px solid var(--border); margin-bottom: 6px; font-family: var(--mono); font-size: 0.8rem; }
+.ws-run-spinner { width: 14px; height: 14px; border: 2px solid #422006; border-top-color: #fcd34d; border-radius: 50%; animation: spin 0.8s linear infinite; flex-shrink: 0; }
+.ws-run-name { flex: 1; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ws-run-id { color: var(--text-muted); font-size: 0.72rem; }
+.ws-run-elapsed { color: var(--text-muted); white-space: nowrap; }
+.ws-run-link { color: var(--accent); text-decoration: none; font-size: 0.75rem; white-space: nowrap; }
+.ws-run-link:hover { text-decoration: underline; }
+.ws-no-runs { color: var(--text-muted); font-family: var(--mono); font-size: 0.8rem; }
+@keyframes spin { to { transform: rotate(360deg); } }
 .ws-section-title { font-family: var(--mono); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); margin-bottom: 10px; display: flex; align-items: center; gap: 8px; }
 .ws-checks { display: flex; flex-wrap: wrap; gap: 6px; max-height: 140px; overflow-y: auto; padding: 4px; }
 .ws-check { display: flex; align-items: center; gap: 4px; font-family: var(--mono); font-size: 0.75rem; color: var(--text-muted); cursor: pointer; padding: 2px 6px; border-radius: 3px; border: 1px solid var(--border); background: var(--surface); transition: all 0.15s; user-select: none; }
 .ws-check:hover { border-color: var(--accent); }
 .ws-check input { accent-color: var(--accent); }
 .ws-check.checked { background: var(--surface3); border-color: var(--accent); color: var(--text); }
+/* Pipeline Guide section */
+.ws-pipeline-guide { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 16px; margin-bottom: 20px; }
+.ws-pipeline-guide h3 { margin: 0 0 12px 0; font-size: 1rem; color: var(--text); }
+.ws-pipeline-guide details summary { font-family: var(--mono); font-size: 0.85rem; color: var(--accent); cursor: pointer; user-select: none; padding: 4px 0; }
+.ws-pipeline-guide details summary:hover { color: var(--text); }
+.pipeline-docs { margin-top: 12px; padding: 12px; background: var(--bg); border: 1px solid var(--border); border-radius: 4px; font-family: var(--mono); font-size: 0.78rem; color: var(--text-muted); line-height: 1.6; white-space: pre-wrap; max-height: 320px; overflow-y: auto; }
+.pipeline-docs table { border-collapse: collapse; width: 100%; margin: 8px 0; }
+.pipeline-docs th, .pipeline-docs td { border: 1px solid var(--border); padding: 4px 8px; text-align: left; font-size: 0.75rem; }
+.pipeline-docs th { color: var(--text); background: var(--surface2); }
+.pipeline-templates { display: flex; align-items: center; gap: 10px; margin-top: 14px; flex-wrap: wrap; }
+.pipeline-templates label { font-family: var(--mono); font-size: 0.75rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; white-space: nowrap; }
+.pipeline-templates select { flex: 1; min-width: 180px; background: var(--surface); border: 1px solid var(--border); color: var(--text); padding: 7px 10px; border-radius: var(--radius); font-family: var(--mono); font-size: 0.82rem; outline: none; }
+.pipeline-templates select:focus { border-color: var(--accent); }
+
+/* Workspace sections */
+.ws-section {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 16px;
+  margin-bottom: 20px;
+}
+
+.ws-section h3 {
+  margin: 0 0 12px 0;
+  font-size: 1rem;
+  color: var(--text);
+}
+
+.ws-active-run {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 12px;
+  background: var(--bg);
+  border-radius: 4px;
+  margin-bottom: 8px;
+}
+
+.ws-active-run .spinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid var(--border);
+  border-top-color: var(--blue);
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.ws-pipeline-guide details {
+  margin-bottom: 12px;
+}
+
+.ws-pipeline-guide summary {
+  cursor: pointer;
+  color: var(--blue);
+}
+
+.ws-pipeline-guide pre {
+  background: var(--bg);
+  padding: 12px;
+  border-radius: 4px;
+  overflow-x: auto;
+  font-size: 0.8rem;
+}
+
+.runs-filter {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+.runs-filter label { color: var(--text-muted); font-size: 0.8rem; white-space: nowrap; }
+.runs-filter select { background: var(--surface); border: 1px solid var(--border); color: var(--text); padding: 6px 10px; border-radius: var(--radius); font-family: var(--mono); font-size: 0.82rem; outline: none; flex: 1; max-width: 360px; }
+.runs-filter select:focus { border-color: var(--accent); }
 </style>
 </head>
 <body>
@@ -496,10 +587,10 @@ const api = {
     if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.error || `Failed: ${r.status}`); }
     return r.json();
   },
-  async runTask(taskId, file) {
+  async runTask(taskId, file, repoPath) {
     const r = await fetch(`${API_BASE}/api/workspace/tasks/${encodeURIComponent(taskId)}/run`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ file })
+      body: JSON.stringify({ file, repo_path: repoPath || '' })
     });
     if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.error || `Failed: ${r.status}`); }
     return r.json();
@@ -534,12 +625,35 @@ const api = {
     if (!r.ok) throw new Error(`Convert failed: ${r.statusText}`);
     return r.json();
   },
-  async runOrchestra(tasksJsonPath, maxParallel = 5) {
+  async runOrchestra(tasksJsonPath, maxParallel = 5, repoPath) {
     const r = await fetch(`${API_BASE}/api/workspace/orchestra/run`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ tasks_json_path: tasksJsonPath, max_parallel: maxParallel })
+      body: JSON.stringify({ tasks_json_path: tasksJsonPath, max_parallel: maxParallel, repo_path: repoPath || '' })
     });
     if (!r.ok) throw new Error(`Orchestra run failed: ${r.statusText}`);
+    return r.json();
+  },
+  async getPipelineTemplates() {
+    const r = await fetch(`${API_BASE}/api/pipelines/templates`);
+    if (!r.ok) throw new Error(`Failed: ${r.status}`);
+    return r.json();
+  },
+  async getPipelineDocs() {
+    const r = await fetch(`${API_BASE}/api/pipelines/docs`);
+    if (!r.ok) throw new Error(`Failed: ${r.status}`);
+    return r.json();
+  },
+  async getActiveRuns(repoPath) {
+    const qs = repoPath ? `?repo_path=${encodeURIComponent(repoPath)}` : '';
+    const r = await fetch(`${API_BASE}/api/workspace/active-runs${qs}`);
+    if (!r.ok) throw new Error(`Failed: ${r.status}`);
+    return r.json();
+  },
+  async cancelRun(runId) {
+    const r = await fetch(`${API_BASE}/api/workspace/runs/${encodeURIComponent(runId)}/cancel`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}'
+    });
+    if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.error || `Failed: ${r.status}`); }
     return r.json();
   }
 };
@@ -711,6 +825,11 @@ function route() {
     selectedTrainStage = null;
   }
 
+  // Stop active-runs polling when leaving workspace
+  if (hash !== '#/workspace' && wsState.activeRunsInterval) {
+    wsStopActiveRunsPolling();
+  }
+
   let m;
   if (hash === '#/' || hash === '#' || hash === '#/runs') {
     renderSessionList();
@@ -771,7 +890,23 @@ async function renderSessionList() {
       }
     } catch(_) {}
 
-    let html = pipelineHtml + `<input type="text" class="search-box" placeholder="Search runs by task name..." id="search">`;
+    // Collect unique repos across all runs
+    const allRepos = [...new Set(runs.flatMap(r => r.workdirs || []))].sort();
+    const initRepo = new URLSearchParams(location.search).get('repo') || '';
+
+    const repoOptions = allRepos.map(r =>
+      `<option value="${escapeHtml(r)}" ${r === initRepo ? 'selected' : ''}>${escapeHtml(r)}</option>`
+    ).join('');
+
+    let html = pipelineHtml + `
+      <div class="runs-filter">
+        <label>Filter by repo:</label>
+        <select id="runs-repo-filter" onchange="filterRuns()">
+          <option value="">All repos</option>
+          ${repoOptions}
+        </select>
+      </div>
+      <input type="text" class="search-box" placeholder="Search runs by task name..." id="search">`;
     html += `<table class="runs-table"><thead><tr>
       <th>Run</th><th>Status</th><th>Tasks</th><th>ECC</th><th>Output</th><th>Cost</th>
     </tr></thead><tbody id="runs-body">`;
@@ -782,7 +917,8 @@ async function renderSessionList() {
       // Use run ID as primary name, timestamp as secondary
       const runName = run.id;
       const timeStr = `${formatDate(run.started_at_iso)} ${formatTime(run.started_at_iso)}`;
-      html += `<tr onclick="location.hash='#/run/${run.id}'" data-id="${run.id}">
+      const workdirsJson = JSON.stringify(run.workdirs || []).replace(/'/g, '&#39;');
+      html += `<tr onclick="location.hash='#/run/${run.id}'" data-id="${run.id}" data-workdirs='${workdirsJson}'>
         <td><span class="run-date" style="color:var(--text)">${runName}</span> <span class="run-time" style="display:block;margin-top:2px">${timeStr}</span></td>
         <td>
           <div class="status-bar">
@@ -802,17 +938,42 @@ async function renderSessionList() {
     html += '</tbody></table>';
     app.innerHTML = html;
 
-    // Search filter
+    // Apply initial repo filter from URL
+    if (initRepo) filterRuns();
+
+    // Search filter (also respects repo filter)
     const search = $('#search');
     search.addEventListener('input', () => {
       const q = search.value.toLowerCase();
+      const repoFilter = $('#runs-repo-filter')?.value || '';
       document.querySelectorAll('#runs-body tr').forEach(tr => {
-        tr.style.display = tr.dataset.id.includes(q) ? '' : 'none';
+        const matchesSearch = tr.dataset.id.includes(q);
+        const matchesRepo = !repoFilter || JSON.parse(tr.dataset.workdirs || '[]').includes(repoFilter);
+        tr.style.display = matchesSearch && matchesRepo ? '' : 'none';
       });
     });
   } catch (e) {
     app.innerHTML = `<div class="error-banner">Error: ${e.message}</div>`;
   }
+}
+
+function filterRuns() {
+  const repoFilter = $('#runs-repo-filter')?.value || '';
+  const searchEl = $('#search');
+  const q = searchEl ? searchEl.value.toLowerCase() : '';
+  const params = new URLSearchParams(location.search);
+  if (repoFilter) {
+    params.set('repo', repoFilter);
+  } else {
+    params.delete('repo');
+  }
+  const newSearch = params.toString();
+  history.replaceState(null, '', newSearch ? '?' + newSearch + location.hash : location.pathname + location.hash);
+  document.querySelectorAll('#runs-body tr').forEach(tr => {
+    const matchesSearch = !q || tr.dataset.id.includes(q);
+    const matchesRepo = !repoFilter || JSON.parse(tr.dataset.workdirs || '[]').includes(repoFilter);
+    tr.style.display = matchesSearch && matchesRepo ? '' : 'none';
+  });
 }
 
 async function renderRunDetail(runId) {
@@ -1345,7 +1506,7 @@ function configShowEditorModal(title, name, body, scope, onSave, isNew) {
 }
 
 // ── Workspace Screen ──
-const wsState = { repos: null, selectedRepo: null, taskFiles: null, selectedFile: null, tasks: [], agents: null, skills: null };
+const wsState = { repos: null, selectedRepo: null, taskFiles: null, selectedFile: null, tasks: [], agents: null, skills: null, pipelineTemplates: null, pipelineDocs: null, activeRuns: [], activeRunsInterval: null };
 
 async function renderWorkspaceScreen() {
   const app = $('#app');
@@ -1359,6 +1520,38 @@ async function renderWorkspaceScreen() {
     }
 
     let html = '';
+
+    // ── Pipeline Guide ──
+    if (!wsState.pipelineTemplates) {
+      try { wsState.pipelineTemplates = (await api.getPipelineTemplates()).templates || []; } catch (e) { wsState.pipelineTemplates = []; }
+    }
+    if (!wsState.pipelineDocs) {
+      try { wsState.pipelineDocs = (await api.getPipelineDocs()).how_to_write || ''; } catch (e) { wsState.pipelineDocs = ''; }
+    }
+    const templateOptions = wsState.pipelineTemplates.map(t =>
+      `<option value="${escapeHtml(t.name)}" title="${escapeHtml(t.description)}">${escapeHtml(t.name)} — ${escapeHtml(t.description)}</option>`
+    ).join('');
+    html += `<div class="ws-section ws-pipeline-guide">
+      <h3>Pipeline Guide</h3>
+      <details>
+        <summary>How to write pipelines</summary>
+        <div class="pipeline-docs" id="ws-pipeline-docs">${escapeHtml(wsState.pipelineDocs)}</div>
+      </details>
+      <div class="pipeline-templates">
+        <label>Quick Start:</label>
+        <select id="ws-pipeline-template">
+          <option value="">Choose a template...</option>
+          ${templateOptions}
+        </select>
+        <button class="btn" onclick="wsUseTemplate()">Use Template</button>
+      </div>
+    </div>`;
+
+    // ── Active Runs ──
+    html += `<div class="ws-active-runs">
+      <h3>Active Runs</h3>
+      <div id="ws-active-runs">${wsRenderActiveRuns(wsState.activeRuns)}</div>
+    </div>`;
 
     // ── Brainstorm Panel ──
     html += `<div class="ws-brainstorm">
@@ -1419,6 +1612,9 @@ async function renderWorkspaceScreen() {
     if (wsState.selectedRepo && !wsState.taskFiles) {
       await wsLoadRepoTasks(wsState.selectedRepo);
     }
+
+    // Start polling active runs
+    wsStartActiveRunsPolling();
   } catch (e) {
     app.innerHTML = `<div class="error-banner">Error: ${e.message}</div>`;
   }
@@ -1429,6 +1625,7 @@ async function wsSelectRepo(repoPath) {
   wsState.taskFiles = null;
   wsState.selectedFile = null;
   wsState.tasks = [];
+  wsState.activeRuns = [];
   await renderWorkspaceScreen();
 }
 
@@ -1447,6 +1644,69 @@ async function wsLoadRepoTasks(repoPath) {
   } catch (e) {
     const content = $('#ws-content');
     if (content) content.innerHTML = `<div class="error-banner">Error loading tasks: ${e.message}</div>`;
+  }
+}
+
+function wsFormatElapsed(seconds) {
+  if (seconds < 60) return `${seconds}s`;
+  const m = Math.floor(seconds / 60), s = seconds % 60;
+  return s > 0 ? `${m}m ${s}s` : `${m}m`;
+}
+
+function wsRenderActiveRuns(runs) {
+  if (!runs || runs.length === 0) {
+    return '<span class="ws-no-runs">No active runs</span>';
+  }
+  return runs.map(r => {
+    const elapsed = wsFormatElapsed(r.elapsed_seconds || 0);
+    const counts = r.task_counts || {};
+    const detail = [
+      counts.running > 0 ? `${counts.running} running` : null,
+      counts.pending > 0 ? `${counts.pending} pending` : null,
+    ].filter(Boolean).join(', ');
+    return `<div class="ws-run-row">
+      <div class="ws-run-spinner"></div>
+      <span class="ws-run-name" title="${escapeHtml(r.run_id)}">${escapeHtml(r.task_name || r.run_id)}</span>
+      <span class="ws-run-elapsed">${elapsed}</span>
+      ${detail ? `<span class="ws-run-id">${escapeHtml(detail)}</span>` : ''}
+      <a class="ws-run-link" href="#/run/${encodeURIComponent(r.run_id)}">View</a>
+      <button class="btn" style="padding:2px 8px;font-size:0.72rem" onclick="wsCancelRun('${escapeHtml(r.run_id)}')">Cancel</button>
+    </div>`;
+  }).join('');
+}
+
+async function wsLoadActiveRuns() {
+  if (!wsState.selectedRepo) return;
+  try {
+    const data = await api.getActiveRuns(wsState.selectedRepo);
+    wsState.activeRuns = data.runs || [];
+  } catch (e) {
+    wsState.activeRuns = [];
+  }
+  const el = $('#ws-active-runs');
+  if (el) el.innerHTML = wsRenderActiveRuns(wsState.activeRuns);
+}
+
+function wsStartActiveRunsPolling() {
+  if (wsState.activeRunsInterval) return;
+  wsLoadActiveRuns();
+  wsState.activeRunsInterval = setInterval(wsLoadActiveRuns, 5000);
+}
+
+function wsStopActiveRunsPolling() {
+  if (wsState.activeRunsInterval) {
+    clearInterval(wsState.activeRunsInterval);
+    wsState.activeRunsInterval = null;
+  }
+}
+
+async function wsCancelRun(runId) {
+  if (!confirm(`Cancel run ${runId}?`)) return;
+  try {
+    await api.cancelRun(runId);
+    await wsLoadActiveRuns();
+  } catch (e) {
+    alert('Cancel failed: ' + e.message);
   }
 }
 
@@ -1534,8 +1794,9 @@ async function wsSelectFile(filePath) {
 async function wsRunTask(taskId, filePath) {
   if (!confirm(`Run task "${taskId}"?`)) return;
   try {
-    const result = await api.runTask(taskId, filePath);
+    const result = await api.runTask(taskId, filePath, wsState.selectedRepo);
     alert(`Task started! Run ID: ${result.run_id || 'unknown'}\nCheck the Runs tab for progress.`);
+    wsLoadActiveRuns();
   } catch (e) {
     alert('Failed to run task: ' + e.message);
   }
@@ -1736,9 +1997,10 @@ async function wsShowTaskModal(task, isNew) {
         await api.updateTask(task.id, filePath, fields);
 
         runBtn.textContent = 'Running...';
-        const result = await api.runTask(task.id, filePath);
+        const result = await api.runTask(task.id, filePath, wsState.selectedRepo);
         overlay.remove();
         alert(`Task started! Run ID: ${result.run_id || 'unknown'}\nCheck the Runs tab.`);
+        wsLoadActiveRuns();
         wsState.taskFiles = null;
         await wsLoadRepoTasks(wsState.selectedRepo);
       } catch (e) {
@@ -1800,12 +2062,55 @@ async function wsRunOrchestra() {
   try {
     await api.saveTasksMd(tasksMdPath, tasksMdEl.value);
     await api.convertTasksMd(tasksMdPath, tasksJsonPath);
-    const result = await api.runOrchestra(tasksJsonPath);
+    const result = await api.runOrchestra(tasksJsonPath, 5, wsState.selectedRepo);
     alert(`Orchestra started! Run ID: ${result.run_id || 'unknown'}\nCheck the Runs tab.`);
     wsState.taskFiles = null;
+    wsLoadActiveRuns();
     await wsLoadRepoTasks(wsState.selectedRepo);
   } catch (e) {
     alert('Orchestra failed: ' + e.message);
+  }
+}
+
+async function wsUseTemplate() {
+  const sel = $('#ws-pipeline-template');
+  if (!sel || !sel.value) { alert('Choose a template first'); return; }
+  const name = sel.value;
+  const template = (wsState.pipelineTemplates || []).find(t => t.name === name);
+  if (!template) return;
+  const targetDir = wsState.selectedRepo || '.';
+  const stages = (template.stages || []).join(' → ');
+  const msg = `Template: ${name}\nDescription: ${template.description || ''}\nStages: ${stages}\n\nThis will create:\n  ${targetDir}/pipeline-${name}.json\n\nContinue?`;
+  if (!confirm(msg)) return;
+  try {
+    const r = await fetch(`${API_BASE}/api/pipelines/templates/${encodeURIComponent(name)}/create`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ dest_dir: targetDir })
+    });
+    if (r.ok) {
+      const result = await r.json();
+      alert(`Pipeline created: ${result.path || `pipeline-${name}.json`}`);
+    } else {
+      // Fallback: show the template JSON in the docs panel for manual copy
+      const pipelineJson = JSON.stringify({
+        name: template.name,
+        stages: (template.stages || []).map(s => ({
+          name: s,
+          tasks: [{ file: `tasks-${s.toLowerCase()}.json`, max_parallel: 3 }],
+          pass_outputs_to_next: true
+        })),
+        aggregate: true
+      }, null, 2);
+      const docsEl = $('#ws-pipeline-docs');
+      if (docsEl) {
+        const parentDetails = docsEl.closest('details');
+        if (parentDetails) parentDetails.open = true;
+        docsEl.textContent = `# Template: ${name} — copy to pipeline-${name}.json\n\n${pipelineJson}`;
+      }
+      alert('API endpoint not available — template JSON shown in the docs panel.');
+    }
+  } catch (e) {
+    alert('Failed to use template: ' + e.message);
   }
 }
 

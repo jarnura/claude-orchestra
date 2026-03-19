@@ -1,0 +1,74 @@
+{
+  "tasks": [
+    {
+      "id": "task-1-backend-add-active-runs",
+      "name": "Task 1: Backend - Add Active Runs API with Repo Filter",
+      "prompt": "Add API endpoints for active runs and filtering:\n\n1. `GET /api/runs/active` - Return currently running tasks across all runs\n```json\n{\n  \"active_tasks\": [\n    {\n      \"run_id\": \"2026-03-20_04-21-13\",\n      \"task_id\": \"backend-api\",\n      \"task_name\": \"Backend API\",\n      \"repo\": \"/home/jarnura/projects/claude-orchestra\",\n      \"status\": \"running\",\n      \"started_at\": 1234567890\n    }\n  ]\n}\n```\n\n2. `GET /api/runs?repo=/path/to/repo` - Filter runs by repo path\n\n3. `GET /api/runs/active?repo=/path/to/repo` - Filter active tasks by repo\n\nImplementation:\n- Parse state.json files in logs directory\n- Filter tasks where status is \"running\"\n- Extract repo from task workdir or run metadata\n- Cache results briefly (5 seconds) to avoid repeated file reads\n\n---",
+      "workdir": "/home/jarnura/projects/claude-orchestra",
+      "model": "sonnet",
+      "effort": "medium",
+      "status": "done",
+      "cost_usd": 0.6125846000000001
+    },
+    {
+      "id": "task-2-backend-add-pipeline-te",
+      "name": "Task 2: Backend - Add Pipeline Templates API",
+      "prompt": "Add API endpoint to list available pipeline templates:\n\n`GET /api/pipelines/templates`\n```json\n{\n  \"templates\": [\n    {\n      \"name\": \"feature\",\n      \"description\": \"Plan → Implement → Verify pipeline for new features\",\n      \"stages\": [\"plan\", \"implement\", \"verify\"],\n      \"file\": \"pipelines/feature.json\"\n    },\n    {\n      \"name\": \"bugfix\", \n      \"description\": \"Investigate → Fix → Test pipeline for bug fixes\",\n      \"stages\": [\"investigate\", \"fix\", \"test\"],\n      \"file\": \"pipelines/bugfix.json\"\n    }\n  ]\n}\n```\n\nAlso add pipeline documentation:\n`GET /api/pipelines/docs`\n```json\n{\n  \"how_to_write\": \"## Pipeline Format\\n\\nPipelines are JSON files in the `pipelines/` directory...\",\n  \"example\": \"{\\\"name\\\": \\\"my-pipeline\\\", \\\"stages\\\": [...]}\"\n}\n```\n\nCheck templates/ directory for existing pipeline templates and include them.\n\n---",
+      "workdir": "/home/jarnura/projects/claude-orchestra",
+      "model": "sonnet",
+      "effort": "medium",
+      "status": "done",
+      "cost_usd": 0.27602925
+    },
+    {
+      "id": "task-3-frontend-add-active-run",
+      "name": "Task 3: Frontend - Add Active Runs Section to Workspace",
+      "prompt": "Add \"Active Runs\" section to Workspace screen that shows:\n- Currently running tasks for the selected repo\n- Progress indicator (running spinner)\n- Link to the full run details\n- Cancel button (if implementable)\n\nUI structure after repo selection:\n```html\n<div class=\"ws-section\">\n  <h3>Active Runs</h3>\n  <div id=\"ws-active-runs\">\n    <!-- Show running tasks or \"No active runs\" message -->\n  </div>\n</div>\n\n<div class=\"ws-section\">\n  <h3>Brainstorm</h3>\n  <!-- Existing brainstorm panel -->\n</div>\n```\n\nAdd JavaScript:\n- `wsLoadActiveRuns()` - Fetch active runs for selected repo\n- `wsRenderActiveRuns(activeTasks)` - Render running tasks list\n- Poll every 5 seconds when runs are active\n- Show task name, run ID, elapsed time\n\n---",
+      "workdir": "/home/jarnura/projects/claude-orchestra",
+      "model": "sonnet",
+      "effort": "high",
+      "status": "done",
+      "cost_usd": 1.9659414000000002
+    },
+    {
+      "id": "task-4-frontend-add-pipeline-g",
+      "name": "Task 4: Frontend - Add Pipeline Guide to Workspace",
+      "prompt": "Add \"Pipeline Guide\" section to Workspace screen:\n\n```html\n<div class=\"ws-section ws-pipeline-guide\">\n  <h3>Pipeline Guide</h3>\n  <details>\n    <summary>How to write pipelines</summary>\n    <div class=\"pipeline-docs\">\n      <!-- Documentation loaded from API -->\n    </div>\n  </details>\n  <div class=\"pipeline-templates\">\n    <label>Quick Start:</label>\n    <select id=\"ws-pipeline-template\">\n      <option value=\"\">Choose a template...</option>\n      <!-- Templates from API -->\n    </select>\n    <button class=\"btn\" onclick=\"wsUseTemplate()\">Use Template</button>\n  </div>\n</div>\n```\n\nThe guide should show:\n1. Pipeline JSON format explanation\n2. Stage configuration options\n3. Available templates dropdown\n4. Button to create new pipeline from template\n\n---",
+      "workdir": "/home/jarnura/projects/claude-orchestra",
+      "model": "sonnet",
+      "effort": "medium",
+      "status": "done",
+      "cost_usd": 0.6166266499999999
+    },
+    {
+      "id": "task-5-frontend-add-repo-filte",
+      "name": "Task 5: Frontend - Add Repo Filter to Runs Screen",
+      "prompt": "Add repo filter dropdown to Runs screen:\n\n```html\n<div class=\"runs-filter\">\n  <label>Filter by repo:</label>\n  <select id=\"runs-repo-filter\" onchange=\"filterRuns()\">\n    <option value=\"\">All repos</option>\n    <!-- Populated from API -->\n  </select>\n</div>\n```\n\nImplementation:\n- Fetch repos on Runs screen load\n- Store filter value in URL param `?repo=/path`\n- Filter the runs list based on selected repo\n- Update URL when filter changes\n- Read filter from URL on page load\n\n---",
+      "workdir": "/home/jarnura/projects/claude-orchestra",
+      "model": "sonnet",
+      "effort": "medium",
+      "status": "done",
+      "cost_usd": 0.9912679499999999
+    },
+    {
+      "id": "task-6-frontend-css-for-worksp",
+      "name": "Task 6: Frontend - CSS for Workspace Sections",
+      "prompt": "Add CSS for new workspace sections:\n\n```css\n.ws-section {\n  background: var(--surface);\n  border: 1px solid var(--border);\n  border-radius: 8px;\n  padding: 16px;\n  margin-bottom: 20px;\n}\n\n.ws-section h3 {\n  margin: 0 0 12px 0;\n  font-size: 1rem;\n  color: var(--text);\n}\n\n.ws-active-run {\n  display: flex;\n  align-items: center;\n  gap: 12px;\n  padding: 8px 12px;\n  background: var(--bg);\n  border-radius: 4px;\n  margin-bottom: 8px;\n}\n\n.ws-active-run .spinner {\n  width: 16px;\n  height: 16px;\n  border: 2px solid var(--border);\n  border-top-color: var(--blue);\n  border-radius: 50%;\n  animation: spin 1s linear infinite;\n}\n\n@keyframes spin {\n  to { transform: rotate(360deg); }\n}\n\n.ws-pipeline-guide details {\n  margin-bottom: 12px;\n}\n\n.ws-pipeline-guide summary {\n  cursor: pointer;\n  color: var(--blue);\n}\n\n.ws-pipeline-guide pre {\n  background: var(--bg);\n  padding: 12px;\n  border-radius: 4px;\n  overflow-x: auto;\n  font-size: 0.8rem;\n}\n\n.runs-filter {\n  display: flex;\n  align-items: center;\n  gap: 8px;\n  margin-bottom: 16px;\n}\n```\n\n---",
+      "workdir": "/home/jarnura/projects/claude-orchestra",
+      "model": "haiku",
+      "effort": "low",
+      "status": "done",
+      "cost_usd": 0.10058935
+    },
+    {
+      "id": "task-7-backend-add-run-metadat",
+      "name": "Task 7: Backend - Add Run Metadata for Repo Tracking",
+      "prompt": "Modify the orchestra run API to include repo metadata:\n\n`POST /api/workspace/orchestra/run` should also save a `metadata.json` in the log dir:\n```json\n{\n  \"repo_path\": \"/home/jarnura/projects/claude-orchestra\",\n  \"tasks_file\": \"/home/jarnura/projects/claude-orchestra/tasks.json\",\n  \"started_at\": \"2026-03-20T04:21:13Z\",\n  \"triggered_from\": \"workspace\"\n}\n```\n\nThis allows filtering runs by repo in the Runs screen.\n\nAlso update `_api_runs()` to read this metadata and include it in the response:\n```json\n{\n  \"id\": \"2026-03-20_04-21-13\",\n  \"repo_path\": \"/home/jarnura/projects/claude-orchestra\",\n  ...\n}\n```",
+      "workdir": "/home/jarnura/projects/claude-orchestra",
+      "model": "haiku",
+      "effort": "low",
+      "status": "done",
+      "cost_usd": 0.133597
+    }
+  ]
+}

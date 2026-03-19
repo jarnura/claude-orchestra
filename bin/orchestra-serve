@@ -18,6 +18,7 @@ import os
 import queue
 import re
 import secrets
+import signal
 import subprocess
 import sys
 import tempfile
@@ -70,6 +71,26 @@ WORKSPACE_SCAN_DIRS = [
 
 # Workspace task ID: allows uppercase too since user-defined tasks may use mixed case
 WORKSPACE_TASK_ID_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_-]*$")
+
+# Simple time-based cache to avoid repeated state.json reads
+_CACHE: dict = {}
+_CACHE_TTL = 5  # seconds
+
+
+def _cached(key: str, fn):
+    now = time.monotonic()
+    if key in _CACHE and now - _CACHE[key][0] < _CACHE_TTL:
+        return _CACHE[key][1]
+    result = fn()
+    _CACHE[key] = (now, result)
+    return result
+
+
+def _cache_invalidate(prefix: str):
+    for k in list(_CACHE.keys()):
+        if k.startswith(prefix):
+            del _CACHE[k]
+
 
 ORCHESTRA_BIN = SCRIPT_DIR / "orchestra"
 
@@ -813,7 +834,9 @@ class OrchestraHandler(BaseHTTPRequestHandler):
         if path in ("", "/"):
             self._serve_file(VIEWER_DIR / "index.html", "text/html")
         elif path == "/api/runs":
-            self._api_runs()
+            self._api_runs(qs)
+        elif path == "/api/runs/active":
+            self._api_runs_active(qs)
         elif m := re.match(r"^/api/runs/([^/]+)$", path):
             self._api_run_detail(m.group(1))
         elif m := re.match(r"^/api/runs/([^/]+)/([^/]+)/output$", path):
@@ -823,6 +846,10 @@ class OrchestraHandler(BaseHTTPRequestHandler):
             self._api_task_stream(m.group(1), m.group(2), summarize)
         elif path == "/api/pipelines":
             self._api_pipelines()
+        elif path == "/api/pipelines/templates":
+            self._api_pipeline_templates()
+        elif path == "/api/pipelines/docs":
+            self._api_pipeline_docs()
         elif m := re.match(r"^/api/pipeline/([^/]+)$", path):
             self._api_pipeline_detail(m.group(1))
         elif path == "/api/config/paths":
@@ -847,6 +874,8 @@ class OrchestraHandler(BaseHTTPRequestHandler):
             self._api_workspace_tasks_file()
         elif path == "/api/workspace/tasks-md":
             self._api_workspace_tasks_md_get()
+        elif path == "/api/workspace/active-runs":
+            self._api_workspace_active_runs()
         else:
             self._not_found()
 
@@ -864,6 +893,8 @@ class OrchestraHandler(BaseHTTPRequestHandler):
             self._api_workspace_tasks_md_convert()
         elif path == "/api/workspace/orchestra/run":
             self._api_workspace_orchestra_run()
+        elif m := re.match(r"^/api/workspace/runs/([^/]+)/cancel$", path):
+            self._api_workspace_run_cancel(m.group(1))
         else:
             self._not_found()
 
@@ -911,22 +942,39 @@ class OrchestraHandler(BaseHTTPRequestHandler):
             return False
         return True
 
-    def _api_runs(self):
+    def _load_all_runs(self):
+        """Read all run state files and return a list of (run_dir, state) tuples.
+        Results are cached for _CACHE_TTL seconds."""
+        logs_dir = self.logs_dir
+
+        def _read():
+            result = []
+            if not logs_dir.is_dir():
+                return result
+            for run_dir in sorted(logs_dir.iterdir(), reverse=True):
+                if not run_dir.is_dir():
+                    continue
+                state_file = run_dir / "state.json"
+                if not state_file.exists():
+                    continue
+                try:
+                    state = json.loads(state_file.read_text())
+                except Exception:
+                    continue
+                result.append((run_dir, state))
+            return result
+
+        return _cached(f"runs:{logs_dir}", _read)
+
+    def _api_runs(self, qs: dict):
+        repo_filter = qs.get("repo", [None])[0]
         runs = []
-        if not self.logs_dir.is_dir():
-            self._json({"runs": []})
-            return
-        for run_dir in sorted(self.logs_dir.iterdir(), reverse=True):
-            if not run_dir.is_dir():
-                continue
-            state_file = run_dir / "state.json"
-            if not state_file.exists():
-                continue
-            try:
-                state = json.loads(state_file.read_text())
-            except Exception:
-                continue
+        for run_dir, state in self._load_all_runs():
             tasks = state.get("tasks", [])
+            # Apply repo filter: include run if any task matches the requested workdir
+            if repo_filter:
+                if not any(t.get("workdir") == repo_filter for t in tasks):
+                    continue
             counts = {
                 "total": len(tasks),
                 "done": 0,
@@ -960,18 +1008,59 @@ class OrchestraHandler(BaseHTTPRequestHandler):
                 iso = datetime.fromtimestamp(int(ts), tz=timezone.utc).isoformat()
             except Exception:
                 iso = None
-            runs.append(
-                {
-                    "id": run_dir.name,
-                    "started_at": ts,
-                    "started_at_iso": iso,
-                    "ecc_enabled": state.get("ecc_enabled", False),
-                    "task_counts": counts,
-                    "total_output_bytes": total_output,
-                    "total_cost_usd": total_cost,
-                }
-            )
+            workdirs = sorted({
+                t.get("workdir", "")
+                for t in tasks
+                if t.get("workdir", "")
+            })
+
+            # Read metadata.json if it exists
+            repo_path = None
+            metadata_file = run_dir / "metadata.json"
+            if metadata_file.exists():
+                try:
+                    metadata = json.loads(metadata_file.read_text())
+                    repo_path = metadata.get("repo_path")
+                except Exception:
+                    pass
+
+            run_dict = {
+                "id": run_dir.name,
+                "started_at": ts,
+                "started_at_iso": iso,
+                "ecc_enabled": state.get("ecc_enabled", False),
+                "task_counts": counts,
+                "total_output_bytes": total_output,
+                "total_cost_usd": total_cost,
+                "workdirs": workdirs,
+            }
+            if repo_path:
+                run_dict["repo_path"] = repo_path
+            runs.append(run_dict)
         self._json({"runs": runs})
+
+    def _api_runs_active(self, qs: dict):
+        """GET /api/runs/active[?repo=...] — return tasks currently running."""
+        repo_filter = qs.get("repo", [None])[0]
+        active_tasks = []
+        for run_dir, state in self._load_all_runs():
+            for task in state.get("tasks", []):
+                if task.get("status") != "running":
+                    continue
+                workdir = task.get("workdir")
+                if repo_filter and workdir != repo_filter:
+                    continue
+                active_tasks.append(
+                    {
+                        "run_id": run_dir.name,
+                        "task_id": task["id"],
+                        "task_name": task.get("name", ""),
+                        "repo": workdir,
+                        "status": "running",
+                        "started_at": state.get("started_at"),
+                    }
+                )
+        self._json({"active_tasks": active_tasks})
 
     def _api_run_detail(self, run_id):
         if not self._validate_ids(run_id):
@@ -1136,6 +1225,92 @@ class OrchestraHandler(BaseHTTPRequestHandler):
             "total_cost_usd": total_cost,
             "stages": stages,
         })
+
+    def _api_pipeline_templates(self):
+        templates_dir = ORCHESTRA_DIR / "templates" / "pipelines"
+        templates = []
+        # Metadata for known templates
+        known = {
+            "feature": {
+                "description": "Plan → Implement → Review pipeline for new features",
+                "stages": ["Plan", "Implement", "Review"],
+            },
+            "bugfix": {
+                "description": "Diagnose → Fix → Verify pipeline for bug fixes",
+                "stages": ["Diagnose", "Fix", "Verify"],
+            },
+            "audit": {
+                "description": "Parallel security, quality, and architecture audit",
+                "stages": ["Audit (Parallel)"],
+            },
+            "release": {
+                "description": "Test → Security → Documentation pipeline for releases",
+                "stages": ["Test", "Security", "Documentation"],
+            },
+            "refactor": {
+                "description": "Architect → Implement → Test → Review refactoring pipeline",
+                "stages": ["Architect", "Implement", "Test", "Review"],
+            },
+        }
+        if templates_dir.is_dir():
+            for f in sorted(templates_dir.glob("*.json")):
+                name = f.stem
+                pipeline_name = name
+                stages = []
+                try:
+                    data = json.loads(f.read_text())
+                    pipeline_name = data.get("name", name)
+                    stages = [s.get("name", "") for s in data.get("stages", [])]
+                except Exception:
+                    pass
+                meta = known.get(name, {})
+                templates.append({
+                    "name": name,
+                    "description": meta.get("description", pipeline_name),
+                    "stages": meta.get("stages", stages),
+                    "file": f"pipelines/{f.name}",
+                })
+        self._json({"templates": templates})
+
+    def _api_pipeline_docs(self):
+        how_to_write = (
+            "## Pipeline Format\n\n"
+            "Pipelines are JSON files in the `pipelines/` directory (or pass directly to `orchestra-pipeline`).\n\n"
+            "### Top-level fields\n\n"
+            "| Field | Type | Description |\n"
+            "|-------|------|-------------|\n"
+            "| `name` | string | Human-readable pipeline name |\n"
+            "| `stages` | array | Ordered list of stage objects |\n"
+            "| `aggregate` | boolean | Aggregate stage outputs into a final report |\n\n"
+            "### Stage fields\n\n"
+            "| Field | Type | Description |\n"
+            "|-------|------|-------------|\n"
+            "| `name` | string | Stage name |\n"
+            "| `tasks` | array | Task file references (each with `file` and optional `max_parallel`) |\n"
+            "| `pass_outputs_to_next` | boolean | Inject this stage's outputs as context into the next stage |\n\n"
+            "### Running a pipeline\n\n"
+            "```bash\n"
+            "orchestra-pipeline pipeline.json\n"
+            "```\n\n"
+            "Use the built-in templates in `templates/pipelines/` as a starting point."
+        )
+        example = json.dumps({
+            "name": "my-pipeline",
+            "stages": [
+                {
+                    "name": "Plan",
+                    "tasks": [{"file": "tasks-plan.json", "max_parallel": 1}],
+                    "pass_outputs_to_next": True,
+                },
+                {
+                    "name": "Implement",
+                    "tasks": [{"file": "tasks-implement.json", "max_parallel": 5}],
+                    "pass_outputs_to_next": False,
+                },
+            ],
+            "aggregate": True,
+        }, indent=2)
+        self._json({"how_to_write": how_to_write, "example": example})
 
     # ── SSE endpoint ───────────────────────────────────────────────────
 
@@ -1631,10 +1806,11 @@ class OrchestraHandler(BaseHTTPRequestHandler):
 
         # Spawn orchestra in the background
         log_dir = self.logs_dir / run_id
+        log_dir.mkdir(parents=True, exist_ok=True)
         cmd = [str(ORCHESTRA_BIN), "--name", run_id, str(tmp_tasks)]
         env = {**os.environ, "LOG_DIR": str(log_dir)}
         try:
-            subprocess.Popen(
+            proc = subprocess.Popen(
                 cmd,
                 cwd=cwd,
                 env=env,
@@ -1645,6 +1821,12 @@ class OrchestraHandler(BaseHTTPRequestHandler):
         except OSError as e:
             self._error(500, f"Failed to spawn orchestra: {e}")
             return
+
+        # Write meta.json for active-runs tracking
+        repo_path = body.get("repo_path", "")
+        meta = {"repo_path": repo_path, "pid": proc.pid, "source": "workspace",
+                "task_name": task.get("name", task_id), "started_at": int(time.time())}
+        (log_dir / "meta.json").write_text(json.dumps(meta))
 
         self._json_status(202, {"run_id": run_id, "task_id": task_id})
 
@@ -1815,9 +1997,10 @@ class OrchestraHandler(BaseHTTPRequestHandler):
 
         run_id = datetime.now().strftime("%Y-%m-%d_%H-%M-%S") + "-" + uuid.uuid4().hex[:6]
         log_dir = self.logs_dir / run_id
+        log_dir.mkdir(parents=True, exist_ok=True)
         env = {**os.environ, "LOG_DIR": str(log_dir), "MAX_PARALLEL": str(max_parallel)}
         try:
-            subprocess.Popen(
+            proc = subprocess.Popen(
                 [str(ORCHESTRA_BIN), "--name", run_id, str(tasks_json_path)],
                 cwd=str(ORCHESTRA_DIR),
                 env=env,
@@ -1829,11 +2012,126 @@ class OrchestraHandler(BaseHTTPRequestHandler):
             self._error(500, f"Failed to spawn orchestra: {e}")
             return
 
+        # Write meta.json for active-runs tracking
+        repo_path = body.get("repo_path", "")
+        task_count = len(data.get("tasks", []))
+        meta = {"repo_path": repo_path, "pid": proc.pid, "source": "workspace",
+                "task_name": f"{task_count} tasks", "started_at": int(time.time())}
+        (log_dir / "meta.json").write_text(json.dumps(meta))
+
+        # Write metadata.json with repo and trigger info
+        started_at_iso = datetime.now(timezone.utc).isoformat()
+        metadata = {
+            "repo_path": str(tasks_json_path.parent),
+            "tasks_file": str(tasks_json_path),
+            "started_at": started_at_iso,
+            "triggered_from": "workspace"
+        }
+        (log_dir / "metadata.json").write_text(json.dumps(metadata, indent=2))
+
         self._json_status(202, {
             "run_id": run_id,
             "log_dir": str(log_dir),
-            "task_count": len(data.get("tasks", [])),
+            "task_count": task_count,
         })
+
+    def _api_workspace_active_runs(self):
+        """GET /api/workspace/active-runs?repo_path=... — running runs for a repo."""
+        parsed = urlparse(self.path)
+        qs = parse_qs(parsed.query)
+        repo_path_str = (qs.get("repo_path") or [""])[0]
+
+        active = []
+        now = int(time.time())
+        if not self.logs_dir.is_dir():
+            self._json({"runs": []})
+            return
+
+        for run_dir in sorted(self.logs_dir.iterdir(), reverse=True):
+            if not run_dir.is_dir():
+                continue
+            state_file = run_dir / "state.json"
+            meta_file = run_dir / "meta.json"
+            if not state_file.exists():
+                continue
+
+            # Filter by repo_path if provided
+            if repo_path_str and meta_file.exists():
+                try:
+                    meta = json.loads(meta_file.read_text())
+                    if meta.get("repo_path", "") != repo_path_str:
+                        continue
+                except Exception:
+                    continue
+            elif repo_path_str and not meta_file.exists():
+                continue
+
+            try:
+                state = json.loads(state_file.read_text())
+            except Exception:
+                continue
+
+            tasks = state.get("tasks", [])
+            counts = {"total": len(tasks), "running": 0, "pending": 0, "done": 0, "failed": 0}
+            for t in tasks:
+                st = t.get("status", "pending")
+                if st in counts:
+                    counts[st] += 1
+
+            # Only include runs that are still active (running or pending tasks)
+            if counts["running"] == 0 and counts["pending"] == 0:
+                continue
+
+            started_at = state.get("started_at", 0)
+            elapsed = now - int(started_at) if started_at else 0
+
+            meta_data = {}
+            if meta_file.exists():
+                try:
+                    meta_data = json.loads(meta_file.read_text())
+                except Exception:
+                    pass
+
+            active.append({
+                "run_id": run_dir.name,
+                "task_name": meta_data.get("task_name", run_dir.name),
+                "repo_path": meta_data.get("repo_path", ""),
+                "started_at": started_at,
+                "elapsed_seconds": elapsed,
+                "task_counts": counts,
+                "pid": meta_data.get("pid"),
+            })
+
+        self._json({"runs": active})
+
+    def _api_workspace_run_cancel(self, run_id):
+        """POST /api/workspace/runs/{id}/cancel — kill a running orchestra process."""
+        if not RUN_ID_RE.match(run_id):
+            self._error(400, "Invalid run ID format")
+            return
+        run_dir = self.logs_dir / run_id
+        meta_file = run_dir / "meta.json"
+        if not meta_file.exists():
+            self._error(404, "No meta.json for this run")
+            return
+        try:
+            meta = json.loads(meta_file.read_text())
+        except Exception:
+            self._error(500, "Failed to read meta.json")
+            return
+        pid = meta.get("pid")
+        if not pid:
+            self._error(400, "No PID recorded for this run")
+            return
+        try:
+            pgid = os.getpgid(pid)
+            os.killpg(pgid, signal.SIGTERM)
+        except ProcessLookupError:
+            pass  # already gone
+        except Exception as e:
+            self._error(500, f"Failed to kill process: {e}")
+            return
+        self._json({"cancelled": True, "run_id": run_id})
 
     # ── Response helpers ───────────────────────────────────────────────
 
