@@ -26,6 +26,7 @@ AGENTS=""
 SKILLS=""
 HOOKS=""
 APPEND_PROMPT=""
+EXPLICIT_ID=""
 
 # Parse args
 while [[ $# -gt 0 ]]; do
@@ -40,6 +41,7 @@ while [[ $# -gt 0 ]]; do
         --skill) SKILLS="$2"; shift 2 ;;
         --hooks) HOOKS="$2"; shift 2 ;;
         --append) APPEND_PROMPT="$2"; shift 2 ;;
+        --id) EXPLICIT_ID="$2"; shift 2 ;;
         --list-agents)
             source "$LIB_DIR/ecc-adapter.sh"
             ecc_init 2>/dev/null
@@ -69,7 +71,8 @@ while [[ $# -gt 0 ]]; do
             echo "  --workdir DIR      Working directory (default: .)"
             echo "  --model MODEL      Model: opus, sonnet, haiku (default: opus)"
             echo "  --effort LEVEL     Effort: high, medium, low (default: high)"
-            echo "  --name NAME        Task name (auto-generated if omitted)"
+            echo "  --name NAME        Task name (auto-generated if omitted)
+  --id ID            Explicit task ID (overrides auto-generated ID)"
             echo "  --tools TOOLS      Allowed tools (default: Read Grep Glob Bash Edit Write Agent)"
             echo "  --readonly         Shortcut for --tools 'Read Grep Glob Agent'"
             echo "  --agent AGENTS     Comma-separated ECC agent names (e.g., security-reviewer,code-reviewer)"
@@ -104,10 +107,17 @@ fi
 
 # Generate name from prompt if not provided
 if [[ -z "$NAME" ]]; then
-    NAME=$(echo "$PROMPT" | head -c 50 | tr ' ' '-' | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9-]//g')
+    NAME=$(echo "$PROMPT" | head -c 60 | tr ' ' '-' | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9-]//g' | sed 's/-\+/-/g' | sed 's/^-\|-$//g')
 fi
 
-ID="spawn-${NAME}-$(date +%s)"
+# Generate ID: slug (max 30 chars) + 8-char hash
+if [[ -n "$EXPLICIT_ID" ]]; then
+    ID="$EXPLICIT_ID"
+else
+    SLUG=$(echo "$NAME" | cut -c1-30 | sed 's/-$//g')
+    HASH=$(echo "$PROMPT" | sha256sum | head -c 8)
+    ID="${SLUG}-${HASH}"
+fi
 TASKS_FILE="/tmp/orchestra-${ID}.json"
 
 # Create task JSON

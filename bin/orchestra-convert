@@ -38,7 +38,7 @@ tasks = []
 for section in sections:
     lines = section.strip().split('\n')
     name = lines[0].strip()
-    task_id = re.sub(r'[^a-z0-9]+', '-', name.lower()).strip('-')
+    task_id = re.sub(r'[^a-z0-9]+', '-', name.lower()).strip('-')[:30].rstrip('-')
 
     meta = {}
     prompt_lines = []

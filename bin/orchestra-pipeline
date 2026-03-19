@@ -6,12 +6,38 @@ set -eo pipefail
 # with tasks within each stage running in parallel.
 # Enhanced: supports pass_outputs_to_next and aggregate.
 #
-# Usage: orchestra-pipeline <pipeline.json>
+# Usage: orchestra-pipeline [--name NAME] <pipeline.json>
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
-if [[ $# -lt 1 ]]; then
-    echo "Usage: orchestra-pipeline <pipeline.json>"
+# Parse arguments
+PIPELINE_FILE=""
+PIPELINE_NAME_OVERRIDE=""
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --name)
+            PIPELINE_NAME_OVERRIDE="$2"
+            shift 2
+            ;;
+        --name=*)
+            PIPELINE_NAME_OVERRIDE="${1#--name=}"
+            shift
+            ;;
+        *)
+            if [[ -z "$PIPELINE_FILE" ]]; then
+                PIPELINE_FILE="$1"
+            fi
+            shift
+            ;;
+    esac
+done
+
+if [[ -z "$PIPELINE_FILE" ]]; then
+    echo "Usage: orchestra-pipeline [--name NAME] <pipeline.json>"
+    echo ""
+    echo "Options:"
+    echo "  --name NAME    Override pipeline name for log directory"
     echo ""
     echo "Pipeline JSON format:"
     echo '  {'
@@ -27,8 +53,6 @@ if [[ $# -lt 1 ]]; then
     echo '  }'
     exit 1
 fi
-
-PIPELINE_FILE="$1"
 
 if [[ ! -f "$PIPELINE_FILE" ]]; then
     echo "Pipeline file not found: $PIPELINE_FILE"
@@ -126,6 +150,54 @@ PIPELINE_NAME=$(jq -r '.name // "Unnamed Pipeline"' "$PIPELINE_FILE")
 STAGE_COUNT=$(jq '.stages | length' "$PIPELINE_FILE")
 AGGREGATE=$(jq -r '.aggregate // false' "$PIPELINE_FILE")
 
+# Apply name override if provided
+if [[ -n "$PIPELINE_NAME_OVERRIDE" ]]; then
+    PIPELINE_NAME="$PIPELINE_NAME_OVERRIDE"
+fi
+
+# ── Pipeline state tracking ──────────────────────────────────────────────────
+# Create slug from pipeline name for human-readable IDs
+PIPELINE_NAME_SLUG=$(echo "$PIPELINE_NAME" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/-/g' | sed 's/-\+/-/g' | sed 's/^-\|-$//g' | cut -c1-40)
+PIPELINE_ID="${PIPELINE_NAME_SLUG}"
+LOGS_BASE="$(pwd)/logs"
+mkdir -p "$LOGS_BASE"
+PIPELINE_STATE_FILE="$LOGS_BASE/${PIPELINE_ID}.json"
+
+# Write initial pipeline state
+PIPELINE_STAGES_INIT=$(jq '[.stages | to_entries[] | {
+    name: .value.name,
+    index: .key,
+    status: "pending",
+    run_ids: [],
+    task_files: [.value.tasks[].file],
+    pass_outputs_to_next: (.value.pass_outputs_to_next // false)
+}]' "$PIPELINE_FILE")
+
+jq -n \
+    --arg id "$PIPELINE_ID" \
+    --arg name "$PIPELINE_NAME" \
+    --argjson started_at "$(date +%s)" \
+    --arg pf "$(realpath "$PIPELINE_FILE" 2>/dev/null || echo "$PIPELINE_FILE")" \
+    --argjson stages "$PIPELINE_STAGES_INIT" \
+    '{id: $id, name: $name, started_at: $started_at, pipeline_file: $pf, stages: $stages}' \
+    > "$PIPELINE_STATE_FILE"
+
+update_pipeline_stage() {
+    local idx="$1" status="$2"
+    shift 2
+    local run_ids_json="[]"
+    if [[ $# -gt 0 ]]; then
+        run_ids_json=$(printf '%s\n' "$@" | jq -R . | jq -s .)
+    fi
+    local tmp
+    tmp=$(mktemp)
+    jq --argjson idx "$idx" --arg status "$status" --argjson run_ids "$run_ids_json" '
+        .stages[$idx].status = $status |
+        .stages[$idx].run_ids = $run_ids
+    ' "$PIPELINE_STATE_FILE" > "$tmp" && mv "$tmp" "$PIPELINE_STATE_FILE"
+}
+# ─────────────────────────────────────────────────────────────────────────────
+
 log "======================================================="
 log "=== PIPELINE: $PIPELINE_NAME ($STAGE_COUNT stages) ==="
 log "======================================================="
@@ -142,7 +214,10 @@ for (( s=0; s<STAGE_COUNT; s++ )); do
 
     PIDS=()
     FILES=()
-    STAGE_LOG_DIRS=()
+    CURRENT_STAGE_RUN_IDS=()
+
+    # Mark stage as running in pipeline state
+    update_pipeline_stage "$s" "running"
 
     for (( t=0; t<TASK_COUNT; t++ )); do
         FILE=$(jq -r ".stages[$s].tasks[$t].file" "$PIPELINE_FILE")
@@ -164,9 +239,14 @@ for (( s=0; s<STAGE_COUNT; s++ )); do
             fi
         fi
 
+        # Assign deterministic run ID using pipeline name + stage name
+        STAGE_NAME_SLUG=$(echo "$STAGE_NAME" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/-/g' | sed 's/-\+/-/g' | sed 's/^-\|-$//g' | cut -c1-20)
+        STAGE_RUN_ID="${PIPELINE_ID}-${STAGE_NAME_SLUG}"
+        CURRENT_STAGE_RUN_IDS+=("$STAGE_RUN_ID")
+
         FILES+=("$WORK_FILE")
-        log "Launching: $FILE (max_parallel=$MAX_P)"
-        MAX_PARALLEL="$MAX_P" "$SCRIPT_DIR/orchestra" "$WORK_FILE" &
+        log "Launching: $FILE (max_parallel=$MAX_P, run=${STAGE_RUN_ID})"
+        LOG_DIR="$LOGS_BASE/${STAGE_RUN_ID}" MAX_PARALLEL="$MAX_P" "$SCRIPT_DIR/orchestra" "$WORK_FILE" &
         PIDS+=($!)
     done
 
@@ -178,9 +258,19 @@ for (( s=0; s<STAGE_COUNT; s++ )); do
         wait "$pid" 2>/dev/null || true
     done
 
-    # Track last stage's log directory for output passing
-    if [[ ${#FILES[@]} -gt 0 ]]; then
-        PRIOR_LOG_DIR=$(find_log_dir_for_file "${FILES[0]}" 2>/dev/null) || PRIOR_LOG_DIR=""
+    # Determine stage outcome and update pipeline state
+    stage_status="done"
+    for f in "${FILES[@]}"; do
+        if [[ -f "$f" ]] && [[ $(jq '[.tasks[] | select(.status == "failed")] | length' "$f") -gt 0 ]]; then
+            stage_status="failed"
+            break
+        fi
+    done
+    update_pipeline_stage "$s" "$stage_status" "${CURRENT_STAGE_RUN_IDS[@]}"
+
+    # Set PRIOR_LOG_DIR using explicit path (more reliable than find_log_dir_for_file)
+    if [[ ${#CURRENT_STAGE_RUN_IDS[@]} -gt 0 ]]; then
+        PRIOR_LOG_DIR="$LOGS_BASE/${CURRENT_STAGE_RUN_IDS[0]}"
     fi
 
     log ""

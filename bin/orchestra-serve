@@ -23,8 +23,11 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 ORCHESTRA_DIR = SCRIPT_DIR.parent
 VIEWER_DIR = ORCHESTRA_DIR / "viewer"
 
-RUN_ID_RE = re.compile(r"^\d{8}-\d{6}$")
+# Matches old format (20260320-010801), new format (2026-03-20_01-08-01),
+# and custom names (my-feature-run). Prevents path traversal (no . or /).
+RUN_ID_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_-]*$")
 TASK_ID_RE = re.compile(r"^[a-z0-9][a-z0-9_-]*$")
+PIPELINE_ID_RE = re.compile(r"^[a-z0-9][a-z0-9_-]*$")
 
 
 def _summarize_tool(tool: str, inp: dict) -> str:
@@ -64,6 +67,25 @@ def _format_bytes(n: int) -> str:
         return f"{n / 1024:.1f}K"
     else:
         return f"{n / (1024 * 1024):.1f}M"
+
+
+def _extract_cost_from_stream(stream_path: Path):
+    """Return total_cost_usd from a stream.jsonl result event, or None."""
+    try:
+        with open(stream_path, "r", errors="replace") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    ev = json.loads(line)
+                    if ev.get("type") == "result" and "total_cost_usd" in ev:
+                        return float(ev["total_cost_usd"])
+                except (json.JSONDecodeError, ValueError):
+                    continue
+    except OSError:
+        pass
+    return None
 
 
 def _parse_stream(stream_path: Path) -> dict:
@@ -219,6 +241,10 @@ class OrchestraHandler(BaseHTTPRequestHandler):
         elif m := re.match(r"^/api/runs/([^/]+)/([^/]+)/stream$", path):
             summarize = "summarize" in qs
             self._api_task_stream(m.group(1), m.group(2), summarize)
+        elif path == "/api/pipelines":
+            self._api_pipelines()
+        elif m := re.match(r"^/api/pipeline/([^/]+)$", path):
+            self._api_pipeline_detail(m.group(1))
         else:
             self._not_found()
 
@@ -259,10 +285,22 @@ class OrchestraHandler(BaseHTTPRequestHandler):
                 if st in counts:
                     counts[st] += 1
             total_output = 0
+            total_cost = None
             for t in tasks:
                 out_f = run_dir / f"{t['id']}.output.md"
                 if out_f.exists():
                     total_output += out_f.stat().st_size
+                c = t.get("cost_usd")
+                if c is not None:
+                    total_cost = (total_cost or 0.0) + c
+            # Fall back to parsing stream files for runs without cost in state
+            if total_cost is None:
+                for t in tasks:
+                    if t.get("status") in ("done", "failed"):
+                        stream_f = run_dir / f"{t['id']}.stream.jsonl"
+                        c = _extract_cost_from_stream(stream_f)
+                        if c is not None:
+                            total_cost = (total_cost or 0.0) + c
             ts = state.get("started_at", 0)
             try:
                 iso = datetime.fromtimestamp(int(ts), tz=timezone.utc).isoformat()
@@ -276,6 +314,7 @@ class OrchestraHandler(BaseHTTPRequestHandler):
                     "ecc_enabled": state.get("ecc_enabled", False),
                     "task_counts": counts,
                     "total_output_bytes": total_output,
+                    "total_cost_usd": total_cost,
                 }
             )
         self._json({"runs": runs})
@@ -290,13 +329,21 @@ class OrchestraHandler(BaseHTTPRequestHandler):
             return
         state = json.loads(state_file.read_text())
         tasks = []
+        total_cost = None
         for t in state.get("tasks", []):
             tid = t["id"]
             output_f = run_dir / f"{tid}.output.md"
             stream_f = run_dir / f"{tid}.stream.jsonl"
+            # Use cost from state; fall back to parsing stream for older runs
+            cost = t.get("cost_usd")
+            if cost is None and t.get("status") in ("done", "failed") and stream_f.exists():
+                cost = _extract_cost_from_stream(stream_f)
+            if cost is not None:
+                total_cost = (total_cost or 0.0) + cost
             tasks.append(
                 {
                     **t,
+                    "cost_usd": cost,
                     "output_bytes": output_f.stat().st_size
                     if output_f.exists()
                     else 0,
@@ -318,6 +365,7 @@ class OrchestraHandler(BaseHTTPRequestHandler):
                 "started_at": ts,
                 "started_at_iso": iso,
                 "ecc_enabled": state.get("ecc_enabled", False),
+                "total_cost_usd": total_cost,
                 "tasks": tasks,
             }
         )
@@ -343,6 +391,97 @@ class OrchestraHandler(BaseHTTPRequestHandler):
             self._json(summary)
         else:
             self._serve_file(stream_f, "application/x-ndjson")
+
+    def _api_pipelines(self):
+        pipelines = []
+        if not self.logs_dir.is_dir():
+            self._json({"pipelines": []})
+            return
+        # Find pipeline state files: either old format (pipeline-*.json) 
+        # or new format (name-slug.json with 'stages' field)
+        for f in sorted(self.logs_dir.glob("*.json"), reverse=True):
+            # Skip state.json files in run directories
+            if f.parent != self.logs_dir:
+                continue
+            try:
+                data = json.loads(f.read_text())
+                # Pipeline state files have 'stages' array
+                if "stages" not in data or not isinstance(data.get("stages"), list):
+                    continue
+                stages = data.get("stages", [])
+                # Compute overall status
+                statuses = [s.get("status", "pending") for s in stages]
+                if "running" in statuses:
+                    overall = "running"
+                elif "failed" in statuses:
+                    overall = "failed"
+                elif all(s == "done" for s in statuses):
+                    overall = "done"
+                else:
+                    overall = "pending"
+                ts = data.get("started_at", 0)
+                try:
+                    iso = datetime.fromtimestamp(int(ts), tz=timezone.utc).isoformat()
+                except Exception:
+                    iso = None
+                pipelines.append({
+                    "id": data["id"],
+                    "name": data.get("name", "Unnamed"),
+                    "started_at": ts,
+                    "started_at_iso": iso,
+                    "stage_count": len(stages),
+                    "status": overall,
+                    "stages": stages,
+                })
+            except Exception:
+                continue
+        self._json({"pipelines": pipelines})
+
+    def _api_pipeline_detail(self, pipeline_id):
+        if not PIPELINE_ID_RE.match(pipeline_id):
+            self._error(400, "Invalid pipeline ID")
+            return
+        pf = self.logs_dir / f"{pipeline_id}.json"
+        if not pf.exists():
+            self._not_found()
+            return
+        data = json.loads(pf.read_text())
+        stages = []
+        total_cost = None
+        for stage in data.get("stages", []):
+            enriched = dict(stage)
+            run_ids = stage.get("run_ids", [])
+            stage_tasks = []
+            stage_cost = None
+            for run_id in run_ids:
+                run_dir = self.logs_dir / run_id
+                sf = run_dir / "state.json"
+                if sf.exists():
+                    try:
+                        state = json.loads(sf.read_text())
+                        for t in state.get("tasks", []):
+                            cost = t.get("cost_usd")
+                            if cost is not None:
+                                stage_cost = (stage_cost or 0.0) + cost
+                            stage_tasks.append({**t, "run_id": run_id})
+                    except Exception:
+                        pass
+            enriched["tasks"] = stage_tasks
+            enriched["cost_usd"] = stage_cost
+            if stage_cost is not None:
+                total_cost = (total_cost or 0.0) + stage_cost
+            stages.append(enriched)
+        ts = data.get("started_at", 0)
+        try:
+            iso = datetime.fromtimestamp(int(ts), tz=timezone.utc).isoformat()
+        except Exception:
+            iso = None
+        self._json({
+            **data,
+            "started_at_iso": iso,
+            "total_cost_usd": total_cost,
+            "stages": stages,
+        })
 
     def _json(self, data):
         body = json.dumps(data, default=str).encode()

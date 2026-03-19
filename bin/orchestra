@@ -24,7 +24,29 @@ if [[ "$(claude auth status 2>/dev/null | python3 -c 'import json,sys; print(jso
     unset ANTHROPIC_API_KEY
 fi
 
-TASKS_FILE="${1:-tasks.json}"
+# Parse arguments: [--name NAME] [tasks_file]
+RUN_NAME="${RUN_NAME:-}"
+TASKS_FILE=""
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --name)
+            RUN_NAME="$2"
+            shift 2
+            ;;
+        --name=*)
+            RUN_NAME="${1#--name=}"
+            shift
+            ;;
+        *)
+            if [[ -z "$TASKS_FILE" ]]; then
+                TASKS_FILE="$1"
+            fi
+            shift
+            ;;
+    esac
+done
+TASKS_FILE="${TASKS_FILE:-tasks.json}"
 
 # Auto-convert .md -> .json
 if [[ "$TASKS_FILE" == *.md ]]; then
@@ -43,7 +65,11 @@ fi
 
 # Resolve LOG_DIR
 if [[ -z "$LOG_DIR" ]]; then
-    LOG_DIR="./logs/$(date +%Y%m%d-%H%M%S)"
+    if [[ -n "$RUN_NAME" ]]; then
+        LOG_DIR="./logs/${RUN_NAME}"
+    else
+        LOG_DIR="./logs/$(date +%Y-%m-%d_%H-%M-%S)"
+    fi
 fi
 [[ "$LOG_DIR" != /* ]] && LOG_DIR="$(pwd)/${LOG_DIR#./}"
 
@@ -116,7 +142,8 @@ write_state() {
             model: (.model // "opus"),
             agents: (.agents // null),
             skills: (.skills // null),
-            hooks: (.hooks // null)
+            hooks: (.hooks // null),
+            cost_usd: (.cost_usd // null)
         }]
     }' "$TASKS_FILE" > "$LOG_DIR/state.json" 2>/dev/null || true
 }
@@ -168,6 +195,33 @@ update_task_status() {
     jq --arg id "$task_id" --arg s "$new_status" \
         '(.tasks[] | select(.id == $id)).status = $s' \
         "$TASKS_FILE" > "$tmp" && mv "$tmp" "$TASKS_FILE"
+}
+
+update_task_cost() {
+    local task_id="$1" cost="$2"
+    local tmp=$(mktemp)
+    jq --arg id "$task_id" --argjson cost "$cost" \
+        '(.tasks[] | select(.id == $id)).cost_usd = $cost' \
+        "$TASKS_FILE" > "$tmp" && mv "$tmp" "$TASKS_FILE"
+}
+
+extract_task_cost() {
+    local stream_file="$1"
+    [[ -f "$stream_file" ]] || return
+    python3 -c "
+import json, sys
+try:
+    for line in open(sys.argv[1]):
+        line = line.strip()
+        if not line: continue
+        try:
+            ev = json.loads(line)
+            if ev.get('type') == 'result' and 'total_cost_usd' in ev:
+                print(ev['total_cost_usd'])
+                break
+        except: pass
+except: pass
+" "$stream_file" 2>/dev/null || true
 }
 
 # Enhanced launch_task with ECC integration
@@ -261,6 +315,13 @@ reap() {
             else
                 log "✗ ${RED}Failed${NC}: $name (exit=$exit_code, ${mins}m${secs}s)"
                 update_task_status "$id" "failed"
+            fi
+
+            local cost
+            cost=$(extract_task_cost "$LOG_DIR/${id}.stream.jsonl")
+            if [[ -n "$cost" ]]; then
+                update_task_cost "$id" "$cost"
+                log "  cost: \$${cost}"
             fi
 
             unset "PIDS[$pid]"
