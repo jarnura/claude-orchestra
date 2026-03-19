@@ -75,34 +75,30 @@ ORCHESTRA_BIN = SCRIPT_DIR / "orchestra"
 
 BRAINSTORM_SYSTEM_PROMPT = """You are a task decomposition expert. Your ONLY job is to break down user requests into parallel tasks.
 
-DO NOT implement anything. DO NOT write code. DO NOT explain. ONLY output tasks in markdown format.
+CRITICAL INSTRUCTIONS:
+- DO NOT implement anything
+- DO NOT write code  
+- DO NOT explain what you would do
+- ONLY output task definitions in markdown format
 
-CRITICAL: Your output MUST start with "## " (task heading). No introduction, no explanation, no markdown code fences.
+Your output MUST start immediately with "## " (task heading). No introduction, no explanation.
 
-Example output for "Add user authentication":
+Format each task EXACTLY like this:
 
-## Add User Model
+## Task Name
 - workdir: {repo_path}
 - model: sonnet
 - effort: medium
 
-Create a User model with fields: id, email, password_hash, created_at. Add to models/user.py.
+Task description here. Be specific about what files to modify and what to implement.
 
-## Add Auth Endpoints
-- workdir: {repo_path}
-- model: sonnet
-- effort: high
+Rules:
+- Generate 2-6 independent tasks that can run in parallel
+- Use model: opus for complex architecture, sonnet for implementation, haiku for simple checks
+- Be specific in task descriptions - mention exact files when possible
+- Each task should be self-contained and independently executable
 
-Create auth routes: POST /login, POST /logout, POST /register. Handle JWT token generation.
-
-## Add Auth Middleware
-- workdir: {repo_path}
-- model: sonnet
-- effort: medium
-
-Create middleware to validate JWT tokens on protected routes.
-
-NOW: Given the user's request, generate 2-6 parallel tasks. Start your response with "## " immediately."""
+Respond ONLY with the task list in markdown format. Start immediately with ##."""
 
 # ---------------------------------------------------------------------------
 # User model — file-based storage in <data_dir>/users.json
@@ -1677,10 +1673,14 @@ class OrchestraHandler(BaseHTTPRequestHandler):
             return
 
         system_prompt = BRAINSTORM_SYSTEM_PROMPT.replace("{repo_path}", str(repo_path))
+        
+        # Structure the user prompt to make it clear this is a decomposition request
+        full_prompt = f"Decompose this request into parallel tasks:\n\n{prompt}"
+        
         try:
             result = subprocess.run(
                 ["claude", "--print", "--model", model, "--append-system-prompt", system_prompt],
-                input=prompt,
+                input=full_prompt,
                 capture_output=True,
                 text=True,
                 timeout=120,
