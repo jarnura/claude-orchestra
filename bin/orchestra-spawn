@@ -7,7 +7,7 @@ set -euo pipefail
 # Usage:
 #   orchestra-spawn "prompt text" [--workdir DIR] [--model MODEL] [--agent AGENTS] [--skill SKILLS]
 
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
 ORCHESTRA_DIR="$(dirname "$SCRIPT_DIR")"
 LIB_DIR="$ORCHESTRA_DIR/lib"
 

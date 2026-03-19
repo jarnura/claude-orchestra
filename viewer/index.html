@@ -322,13 +322,17 @@ pre:hover .copy-btn { opacity: 1; }
 .ws-task-actions { display: flex; gap: 6px; }
 .btn-success { border-color: #22c55e60; color: #86efac; }
 .btn-success:hover { background: #14532d; border-color: var(--green); color: #86efac; }
-.ws-quickrun { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; margin-bottom: 20px; }
-.ws-quickrun h3 { font-family: var(--mono); font-size: 0.85rem; color: var(--text-muted); margin-bottom: 10px; }
-.ws-quickrun-row { display: flex; gap: 8px; align-items: flex-end; }
-.ws-quickrun-row .ws-select { flex: 3; }
-.ws-quickrun-row .ws-select.ws-model-sel { flex: 1; }
-.ws-quickrun textarea { width: 100%; background: var(--surface2); border: 1px solid var(--border); color: var(--text); padding: 8px 12px; border-radius: var(--radius); font-family: var(--mono); font-size: 0.85rem; outline: none; resize: vertical; min-height: 60px; }
-.ws-quickrun textarea:focus { border-color: var(--accent); }
+/* Brainstorm panel */
+.ws-brainstorm { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 16px; margin-bottom: 20px; }
+.ws-brainstorm h3 { margin: 0 0 12px 0; font-size: 1rem; color: var(--text); }
+.ws-brainstorm-row { display: flex; gap: 12px; align-items: center; }
+.ws-brainstorm-row select { padding: 8px 12px; border-radius: 4px; border: 1px solid var(--border); background: var(--bg); color: var(--text); }
+/* Tasks.md editor */
+#ws-tasks-md-container { margin-top: 16px; border-top: 1px solid var(--border); padding-top: 16px; }
+.ws-tasks-md-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+#ws-tasks-md { width: 100%; min-height: 200px; max-height: 400px; font-family: var(--mono); font-size: 0.8rem; padding: 12px; border: 1px solid var(--border); border-radius: 4px; background: var(--bg); color: var(--text); resize: vertical; }
+.ws-tasks-md-actions { display: flex; gap: 8px; margin-top: 8px; }
+.ws-brainstorm.loading button { opacity: 0.6; pointer-events: none; }
 .ws-empty { text-align: center; color: var(--text-muted); padding: 40px; font-family: var(--mono); font-size: 0.85rem; }
 .ws-section-title { font-family: var(--mono); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); margin-bottom: 10px; display: flex; align-items: center; gap: 8px; }
 .ws-checks { display: flex; flex-wrap: wrap; gap: 6px; max-height: 140px; overflow-y: auto; padding: 4px; }
@@ -498,6 +502,44 @@ const api = {
       body: JSON.stringify({ file })
     });
     if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.error || `Failed: ${r.status}`); }
+    return r.json();
+  },
+  // Brainstorm API
+  async brainstorm(repoPath, prompt, model = 'sonnet') {
+    const r = await fetch(`${API_BASE}/api/workspace/brainstorm`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ repo_path: repoPath, prompt, model })
+    });
+    if (!r.ok) throw new Error(`Brainstorm failed: ${r.statusText}`);
+    return r.json();
+  },
+  async getTasksMd(path) {
+    const r = await fetch(`${API_BASE}/api/workspace/tasks-md?path=${encodeURIComponent(path)}`);
+    if (!r.ok) throw new Error(`Failed to read tasks.md: ${r.statusText}`);
+    return r.json();
+  },
+  async saveTasksMd(path, content) {
+    const r = await fetch(`${API_BASE}/api/workspace/tasks-md`, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path, content })
+    });
+    if (!r.ok) throw new Error(`Failed to save tasks.md: ${r.statusText}`);
+    return r.json();
+  },
+  async convertTasksMd(tasksMdPath, tasksJsonPath) {
+    const r = await fetch(`${API_BASE}/api/workspace/tasks-md/convert`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tasks_md_path: tasksMdPath, tasks_json_path: tasksJsonPath })
+    });
+    if (!r.ok) throw new Error(`Convert failed: ${r.statusText}`);
+    return r.json();
+  },
+  async runOrchestra(tasksJsonPath, maxParallel = 5) {
+    const r = await fetch(`${API_BASE}/api/workspace/orchestra/run`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tasks_json_path: tasksJsonPath, max_parallel: maxParallel })
+    });
+    if (!r.ok) throw new Error(`Orchestra run failed: ${r.statusText}`);
     return r.json();
   }
 };
@@ -1318,22 +1360,31 @@ async function renderWorkspaceScreen() {
 
     let html = '';
 
-    // ── Quick Run Panel ──
-    html += `<div class="ws-quickrun">
-      <h3>Quick Run</h3>
+    // ── Brainstorm Panel ──
+    html += `<div class="ws-brainstorm">
+      <h3>Brainstorm</h3>
       <div class="form-group">
-        <textarea id="ws-qr-prompt" class="form-textarea" style="min-height:60px;max-height:120px" placeholder="Enter prompt to run..."></textarea>
+        <textarea id="ws-brainstorm-prompt" class="form-textarea" style="min-height:60px;max-height:120px" placeholder="Describe what you want to build..."></textarea>
       </div>
-      <div class="ws-quickrun-row">
-        <div class="ws-select ws-model-sel">
-          <label>Model</label>
-          <select id="ws-qr-model">
-            <option value="opus">opus</option>
-            <option value="sonnet" selected>sonnet</option>
-            <option value="haiku">haiku</option>
-          </select>
+      <div class="ws-brainstorm-row">
+        <select id="ws-brainstorm-model">
+          <option value="sonnet" selected>sonnet</option>
+          <option value="opus">opus</option>
+          <option value="haiku">haiku</option>
+        </select>
+        <button class="btn btn-primary" onclick="wsBrainstorm()">Brainstorm</button>
+      </div>
+
+      <div id="ws-tasks-md-container" style="display:none">
+        <div class="ws-tasks-md-header">
+          <h4>tasks.md</h4>
+          <span id="ws-task-count"></span>
         </div>
-        <button class="btn btn-primary" onclick="wsQuickRun()">Run</button>
+        <textarea id="ws-tasks-md" class="code-editor"></textarea>
+        <div class="ws-tasks-md-actions">
+          <button class="btn" onclick="wsSaveTasksMd()">Save</button>
+          <button class="btn btn-success" onclick="wsRunOrchestra()">Orchestra</button>
+        </div>
       </div>
     </div>`;
 
@@ -1705,31 +1756,56 @@ async function wsShowTaskModal(task, isNew) {
   document.addEventListener('keydown', escHandler);
 }
 
-async function wsQuickRun() {
-  const prompt = $('#ws-qr-prompt');
-  const model = $('#ws-qr-model');
-  if (!prompt || !prompt.value.trim()) { alert('Enter a prompt'); return; }
+async function wsBrainstorm() {
+  const promptEl = $('#ws-brainstorm-prompt');
+  const modelEl = $('#ws-brainstorm-model');
+  if (!promptEl || !promptEl.value.trim()) { alert('Enter a prompt'); return; }
   if (!wsState.selectedRepo) { alert('Select a repository first'); return; }
 
-  const taskName = 'quick-' + Date.now().toString(36);
-  const filePath = wsState.selectedRepo + '/tasks.json';
-  const taskData = {
-    id: taskName,
-    name: taskName,
-    prompt: prompt.value.trim(),
-    model: model.value,
-    workdir: wsState.selectedRepo,
-  };
-
+  const panel = promptEl.closest('.ws-brainstorm');
+  panel.classList.add('loading');
   try {
-    await api.createTask(filePath, taskData);
-    const result = await api.runTask(taskName, filePath);
-    prompt.value = '';
-    alert(`Quick run started! Run ID: ${result.run_id || 'unknown'}\nCheck the Runs tab.`);
+    const result = await api.brainstorm(wsState.selectedRepo, promptEl.value.trim(), modelEl.value);
+    const container = $('#ws-tasks-md-container');
+    const tasksMdEl = $('#ws-tasks-md');
+    const taskCountEl = $('#ws-task-count');
+    tasksMdEl.value = result.tasks_md || '';
+    const taskCount = (result.tasks_md || '').split('\n').filter(l => l.startsWith('## ')).length;
+    taskCountEl.textContent = taskCount ? `${taskCount} task${taskCount !== 1 ? 's' : ''}` : '';
+    container.style.display = 'block';
+  } catch (e) {
+    alert('Brainstorm failed: ' + e.message);
+  } finally {
+    panel.classList.remove('loading');
+  }
+}
+
+async function wsSaveTasksMd() {
+  const tasksMdEl = $('#ws-tasks-md');
+  if (!wsState.selectedRepo) { alert('Select a repository first'); return; }
+  const filePath = wsState.selectedRepo + '/tasks.md';
+  try {
+    await api.saveTasksMd(filePath, tasksMdEl.value);
+    alert('tasks.md saved.');
+  } catch (e) {
+    alert('Save failed: ' + e.message);
+  }
+}
+
+async function wsRunOrchestra() {
+  if (!wsState.selectedRepo) { alert('Select a repository first'); return; }
+  const tasksMdEl = $('#ws-tasks-md');
+  const tasksMdPath = wsState.selectedRepo + '/tasks.md';
+  const tasksJsonPath = wsState.selectedRepo + '/tasks.json';
+  try {
+    await api.saveTasksMd(tasksMdPath, tasksMdEl.value);
+    await api.convertTasksMd(tasksMdPath, tasksJsonPath);
+    const result = await api.runOrchestra(tasksJsonPath);
+    alert(`Orchestra started! Run ID: ${result.run_id || 'unknown'}\nCheck the Runs tab.`);
     wsState.taskFiles = null;
     await wsLoadRepoTasks(wsState.selectedRepo);
   } catch (e) {
-    alert('Failed: ' + e.message);
+    alert('Orchestra failed: ' + e.message);
   }
 }
 

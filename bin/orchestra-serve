@@ -69,6 +69,37 @@ WORKSPACE_TASK_ID_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_-]*$")
 
 ORCHESTRA_BIN = SCRIPT_DIR / "orchestra"
 
+BRAINSTORM_SYSTEM_PROMPT = """You are a task decomposition expert. Your ONLY job is to break down user requests into parallel tasks.
+
+DO NOT implement anything. DO NOT write code. DO NOT explain. ONLY output tasks in markdown format.
+
+CRITICAL: Your output MUST start with "## " (task heading). No introduction, no explanation, no markdown code fences.
+
+Example output for "Add user authentication":
+
+## Add User Model
+- workdir: {repo_path}
+- model: sonnet
+- effort: medium
+
+Create a User model with fields: id, email, password_hash, created_at. Add to models/user.py.
+
+## Add Auth Endpoints
+- workdir: {repo_path}
+- model: sonnet
+- effort: high
+
+Create auth routes: POST /login, POST /logout, POST /register. Handle JWT token generation.
+
+## Add Auth Middleware
+- workdir: {repo_path}
+- model: sonnet
+- effort: medium
+
+Create middleware to validate JWT tokens on protected routes.
+
+NOW: Given the user's request, generate 2-6 parallel tasks. Start your response with "## " immediately."""
+
 
 def _find_repos() -> list[dict]:
     """Scan common directories for git repos (one level deep)."""
@@ -680,6 +711,8 @@ class OrchestraHandler(BaseHTTPRequestHandler):
             self._api_workspace_repo_tasks(unquote(m.group(1)))
         elif path == "/api/workspace/tasks-file":
             self._api_workspace_tasks_file()
+        elif path == "/api/workspace/tasks-md":
+            self._api_workspace_tasks_md_get()
         else:
             self._not_found()
 
@@ -691,6 +724,12 @@ class OrchestraHandler(BaseHTTPRequestHandler):
             self._api_workspace_task_create()
         elif m := re.match(r"^/api/workspace/tasks/([^/]+)/run$", path):
             self._api_workspace_task_run(m.group(1))
+        elif path == "/api/workspace/brainstorm":
+            self._api_workspace_brainstorm()
+        elif path == "/api/workspace/tasks-md/convert":
+            self._api_workspace_tasks_md_convert()
+        elif path == "/api/workspace/orchestra/run":
+            self._api_workspace_orchestra_run()
         else:
             self._not_found()
 
@@ -704,6 +743,8 @@ class OrchestraHandler(BaseHTTPRequestHandler):
             self._api_config_skill_put(m.group(1))
         elif m := re.match(r"^/api/workspace/tasks/([^/]+)$", path):
             self._api_workspace_task_update(m.group(1))
+        elif path == "/api/workspace/tasks-md":
+            self._api_workspace_tasks_md_put()
         else:
             self._not_found()
 
@@ -1195,7 +1236,33 @@ class OrchestraHandler(BaseHTTPRequestHandler):
             self._not_found()
             return
         task_files = _find_task_files(repo_path)
-        self._json({"repo": str(repo_path), "task_files": task_files})
+
+        # Check if tasks.md exists and read its content
+        tasks_md_path = repo_path / "tasks.md"
+        tasks_md = None
+        if tasks_md_path.is_file():
+            try:
+                content = tasks_md_path.read_text()
+                tasks_md = {
+                    "exists": True,
+                    "path": str(tasks_md_path),
+                    "content": content
+                }
+            except Exception:
+                # If read fails, still include exists=True but without content
+                tasks_md = {
+                    "exists": True,
+                    "path": str(tasks_md_path),
+                    "content": None
+                }
+        else:
+            tasks_md = {"exists": False}
+
+        self._json({
+            "repo": str(repo_path),
+            "task_files": task_files,
+            "tasks_md": tasks_md
+        })
 
     def _api_workspace_tasks_file(self):
         """GET /api/workspace/tasks-file?path=... — read tasks from a file."""
@@ -1214,6 +1281,43 @@ class OrchestraHandler(BaseHTTPRequestHandler):
             self._error(400, err)
             return
         self._json({"tasks": data.get("tasks", []), "file": str(file_path)})
+
+    def _api_workspace_tasks_md_get(self):
+        """GET /api/workspace/tasks-md?path=... — read raw tasks.md content."""
+        parsed = urlparse(self.path)
+        qs = parse_qs(parsed.query)
+        path_list = qs.get("path", [])
+        if not path_list:
+            self._error(400, "Missing 'path' query parameter")
+            return
+        file_path = _validate_workspace_path(path_list[0])
+        if file_path is None:
+            self._error(400, "Invalid file path")
+            return
+        exists = file_path.exists()
+        content = file_path.read_text(encoding="utf-8") if exists else ""
+        self._json({"path": str(file_path), "content": content, "exists": exists})
+
+    def _api_workspace_tasks_md_put(self):
+        """PUT /api/workspace/tasks-md — save raw tasks.md content."""
+        body = self._read_body_json()
+        if body is None:
+            return
+        path_str = body.get("path")
+        content = body.get("content")
+        if not path_str:
+            self._error(400, "Missing 'path' field")
+            return
+        if content is None:
+            self._error(400, "Missing 'content' field")
+            return
+        file_path = _validate_workspace_path(path_str)
+        if file_path is None:
+            self._error(400, "Invalid file path")
+            return
+        file_path.parent.mkdir(parents=True, exist_ok=True)
+        bytes_written = file_path.write_text(content, encoding="utf-8")
+        self._json({"path": str(file_path), "bytes_written": bytes_written})
 
     def _api_workspace_task_create(self):
         """POST /api/workspace/tasks — create a task in a task file."""
@@ -1409,6 +1513,189 @@ class OrchestraHandler(BaseHTTPRequestHandler):
             return
 
         self._json_status(202, {"run_id": run_id, "task_id": task_id})
+
+    def _api_workspace_brainstorm(self):
+        """POST /api/workspace/brainstorm — generate tasks.md via Claude."""
+        body = self._read_body_json()
+        if body is None:
+            return
+        repo_path_str = body.get("repo_path")
+        prompt = body.get("prompt")
+        model = body.get("model", "sonnet")
+
+        if not repo_path_str:
+            self._error(400, "Missing 'repo_path' field")
+            return
+        if not prompt or not isinstance(prompt, str):
+            self._error(400, "Missing or invalid 'prompt' field")
+            return
+        if not isinstance(model, str) or model not in ("opus", "sonnet", "haiku"):
+            self._error(400, "Invalid 'model'; must be opus, sonnet, or haiku")
+            return
+
+        repo_path = _validate_workspace_path(repo_path_str)
+        if repo_path is None or not repo_path.is_dir():
+            self._error(400, "Invalid or non-existent repo_path")
+            return
+
+        system_prompt = BRAINSTORM_SYSTEM_PROMPT.replace("{repo_path}", str(repo_path))
+        try:
+            result = subprocess.run(
+                ["claude", "--print", "--model", model, "--append-system-prompt", system_prompt],
+                input=prompt,
+                capture_output=True,
+                text=True,
+                timeout=120,
+            )
+        except FileNotFoundError:
+            self._error(500, "claude CLI not found")
+            return
+        except subprocess.TimeoutExpired:
+            self._error(504, "Claude CLI timed out")
+            return
+
+        if result.returncode != 0:
+            self._error(500, f"Claude CLI error: {result.stderr.strip()[:200]}")
+            return
+
+        tasks_md = result.stdout.strip()
+        if not tasks_md:
+            self._error(500, "Claude returned empty output")
+            return
+
+        # Count tasks by counting ## headings
+        task_count = sum(1 for line in tasks_md.splitlines() if line.startswith("## "))
+
+        # Save to repo_path/tasks.md atomically
+        tasks_file = repo_path / "tasks.md"
+        tmp_fd, tmp_path = tempfile.mkstemp(dir=str(repo_path), suffix=".md.tmp")
+        try:
+            with os.fdopen(tmp_fd, "w") as f:
+                f.write(tasks_md)
+                f.write("\n")
+            os.replace(tmp_path, str(tasks_file))
+        except Exception as e:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+            self._error(500, f"Failed to write tasks.md: {e}")
+            return
+
+        self._json({
+            "tasks_md": tasks_md,
+            "tasks_file": str(tasks_file),
+            "task_count": task_count,
+        })
+
+    def _api_workspace_tasks_md_convert(self):
+        """POST /api/workspace/tasks-md/convert — convert tasks.md to tasks.json."""
+        body = self._read_body_json()
+        if body is None:
+            return
+        tasks_md_path_str = body.get("tasks_md_path")
+        if not tasks_md_path_str:
+            self._error(400, "Missing 'tasks_md_path' field")
+            return
+        tasks_md_path = _validate_workspace_path(tasks_md_path_str)
+        if tasks_md_path is None:
+            self._error(400, "Invalid tasks_md_path")
+            return
+        if not tasks_md_path.is_file():
+            self._error(400, "tasks_md_path does not exist")
+            return
+
+        # Determine output path
+        tasks_json_path_str = body.get("tasks_json_path")
+        if tasks_json_path_str:
+            tasks_json_path = _validate_workspace_path(tasks_json_path_str)
+            if tasks_json_path is None:
+                self._error(400, "Invalid tasks_json_path")
+                return
+        else:
+            tasks_json_path = tasks_md_path.with_suffix(".json")
+
+        convert_bin = SCRIPT_DIR / "orchestra-convert"
+        try:
+            result = subprocess.run(
+                [str(convert_bin), str(tasks_md_path), str(tasks_json_path)],
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+        except FileNotFoundError:
+            self._error(500, "orchestra-convert not found")
+            return
+        except subprocess.TimeoutExpired:
+            self._error(504, "orchestra-convert timed out")
+            return
+
+        if result.returncode != 0:
+            self._error(500, f"orchestra-convert failed: {result.stderr.strip()[:200]}")
+            return
+
+        # Read the resulting JSON to return task list
+        try:
+            data = json.loads(tasks_json_path.read_text())
+        except Exception as e:
+            self._error(500, f"Failed to read converted JSON: {e}")
+            return
+
+        tasks = data.get("tasks", [])
+        self._json({
+            "tasks_json_path": str(tasks_json_path),
+            "task_count": len(tasks),
+            "tasks": tasks,
+        })
+
+    def _api_workspace_orchestra_run(self):
+        """POST /api/workspace/orchestra/run — run orchestra on a tasks.json file."""
+        body = self._read_body_json()
+        if body is None:
+            return
+        tasks_json_path_str = body.get("tasks_json_path")
+        if not tasks_json_path_str:
+            self._error(400, "Missing 'tasks_json_path' field")
+            return
+        tasks_json_path = _validate_workspace_path(tasks_json_path_str)
+        if tasks_json_path is None:
+            self._error(400, "Invalid tasks_json_path")
+            return
+        if not tasks_json_path.is_file():
+            self._error(400, "tasks_json_path does not exist")
+            return
+
+        data, err = _load_tasks_file(tasks_json_path)
+        if err:
+            self._error(400, err)
+            return
+
+        max_parallel = body.get("max_parallel", 5)
+        if not isinstance(max_parallel, int) or max_parallel < 1 or max_parallel > 50:
+            self._error(400, "max_parallel must be an integer between 1 and 50")
+            return
+
+        run_id = datetime.now().strftime("%Y-%m-%d_%H-%M-%S") + "-" + uuid.uuid4().hex[:6]
+        log_dir = self.logs_dir / run_id
+        env = {**os.environ, "LOG_DIR": str(log_dir), "MAX_PARALLEL": str(max_parallel)}
+        try:
+            subprocess.Popen(
+                [str(ORCHESTRA_BIN), "--name", run_id, str(tasks_json_path)],
+                cwd=str(ORCHESTRA_DIR),
+                env=env,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                start_new_session=True,
+            )
+        except OSError as e:
+            self._error(500, f"Failed to spawn orchestra: {e}")
+            return
+
+        self._json_status(202, {
+            "run_id": run_id,
+            "log_dir": str(log_dir),
+            "task_count": len(data.get("tasks", [])),
+        })
 
     # ── Response helpers ───────────────────────────────────────────────
 

@@ -1,0 +1,74 @@
+{
+  "tasks": [
+    {
+      "id": "backend-brainstorm-api",
+      "name": "Backend - Brainstorm API Endpoint",
+      "prompt": "Add a new API endpoint `POST /api/workspace/brainstorm` to `bin/orchestra-serve`:\n\nRequest body:\n```json\n{\n  \"repo_path\": \"/path/to/repo\",\n  \"prompt\": \"User's brainstorming prompt\",\n  \"model\": \"sonnet\"\n}\n```\n\nResponse:\n```json\n{\n  \"tasks_md\": \"## Task 1\\n- workdir: /path\\n- model: opus\\n\\nPrompt here...\",\n  \"tasks_file\": \"/path/to/repo/tasks.md\",\n  \"task_count\": 3\n}\n```\n\nImplementation:\n1. Add BRAINSTORM_SYSTEM_PROMPT constant that instructs Claude to generate tasks in markdown format compatible with orchestra-convert\n2. Call Claude CLI via subprocess with the system prompt\n3. Save generated tasks.md to the repo path\n4. Return both content and file path\n\nUse: `subprocess.run([\"claude\", \"--print\", \"--model\", model, \"--append-system-prompt\", BRAINSTORM_SYSTEM_PROMPT], input=prompt, capture_output=True, text=True)`\n\nAdd route in do_POST() method.",
+      "workdir": "/home/jarnura/projects/claude-orchestra",
+      "model": "sonnet",
+      "effort": "high",
+      "status": "done",
+      "cost_usd": 0.45354720000000004
+    },
+    {
+      "id": "backend-tasks-md-api",
+      "name": "Backend - Tasks.md Read/Write API",
+      "prompt": "Add API endpoints for tasks.md file operations in `bin/orchestra-serve`:\n\n1. `GET /api/workspace/tasks-md?path=/path/to/tasks.md` - Read tasks.md content\nResponse: `{\"path\": \"...\", \"content\": \"...\", \"exists\": true}`\n\n2. `PUT /api/workspace/tasks-md` - Save tasks.md content\nRequest: `{\"path\": \"...\", \"content\": \"...\"}`\nResponse: `{\"path\": \"...\", \"bytes_written\": 1234}`\n\nAdd routes in do_GET() and do_PUT() methods. Use Path from pathlib for file operations.",
+      "workdir": "/home/jarnura/projects/claude-orchestra",
+      "model": "sonnet",
+      "effort": "low",
+      "status": "done",
+      "cost_usd": 0.19631174999999995
+    },
+    {
+      "id": "backend-convert-orchestra-api",
+      "name": "Backend - Convert & Orchestra API",
+      "prompt": "Add API endpoints for tasks.md conversion and orchestra execution in `bin/orchestra-serve`:\n\n1. `POST /api/workspace/tasks-md/convert` - Convert tasks.md to tasks.json\nRequest: `{\"tasks_md_path\": \"...\", \"tasks_json_path\": \"...\"}` (json_path optional)\nResponse: `{\"tasks_json_path\": \"...\", \"task_count\": 3, \"tasks\": [...]}`\n\n2. `POST /api/workspace/orchestra/run` - Run orchestra on tasks.json\nRequest: `{\"tasks_json_path\": \"...\", \"max_parallel\": 5}`\nResponse: `{\"run_id\": \"run-...\", \"log_dir\": \"...\", \"task_count\": 3}`\n\nImplementation:\n- For convert: Call orchestra-convert script via subprocess\n- For orchestra run: Start orchestra as background process, capture run_id from log dir name\n\nUse subprocess.Popen for orchestra to run it in background.",
+      "workdir": "/home/jarnura/projects/claude-orchestra",
+      "model": "sonnet",
+      "effort": "medium",
+      "status": "done",
+      "cost_usd": 0.57580845
+    },
+    {
+      "id": "backend-load-tasks-md",
+      "name": "Backend - Load existing tasks.md in repo tasks response",
+      "prompt": "Modify `_api_workspace_repo_tasks()` in `bin/orchestra-serve` to also return tasks.md info:\n\n1. Check if tasks.md exists in the repo path\n2. If exists, read its content\n3. Add to response:\n```json\n{\n  \"task_files\": [...],\n  \"tasks_md\": {\n    \"exists\": true,\n    \"path\": \"/path/to/tasks.md\",\n    \"content\": \"...\"\n  }\n}\n```\n\nThis allows the UI to load existing tasks.md when selecting a repo.",
+      "workdir": "/home/jarnura/projects/claude-orchestra",
+      "model": "haiku",
+      "effort": "low",
+      "status": "done",
+      "cost_usd": 0.12107484999999998
+    },
+    {
+      "id": "frontend-api-helpers",
+      "name": "Frontend - Add API Helper Functions",
+      "prompt": "Add new API helper functions to the `api` object in `viewer/index.html`:\n\n```javascript\n// Brainstorm API\napi.brainstorm = async (repoPath, prompt, model = 'sonnet') => {\n  const res = await fetch(`${API_BASE}/api/workspace/brainstorm`, {\n    method: 'POST',\n    headers: { 'Content-Type': 'application/json' },\n    body: JSON.stringify({ repo_path: repoPath, prompt, model })\n  });\n  if (!res.ok) throw new Error(`Brainstorm failed: ${res.statusText}`);\n  return res.json();\n};\n\napi.getTasksMd = async (path) => {\n  const res = await fetch(`${API_BASE}/api/workspace/tasks-md?path=${encodeURIComponent(path)}`);\n  if (!res.ok) throw new Error(`Failed to read tasks.md: ${res.statusText}`);\n  return res.json();\n};\n\napi.saveTasksMd = async (path, content) => {\n  const res = await fetch(`${API_BASE}/api/workspace/tasks-md`, {\n    method: 'PUT', headers: { 'Content-Type': 'application/json' },\n    body: JSON.stringify({ path, content })\n  });\n  if (!res.ok) throw new Error(`Failed to save tasks.md: ${res.statusText}`);\n  return res.json();\n};\n\napi.convertTasksMd = async (tasksMdPath, tasksJsonPath) => {\n  const res = await fetch(`${API_BASE}/api/workspace/tasks-md/convert`, {\n    method: 'POST', headers: { 'Content-Type': 'application/json' },\n    body: JSON.stringify({ tasks_md_path: tasksMdPath, tasks_json_path: tasksJsonPath })\n  });\n  if (!res.ok) throw new Error(`Convert failed: ${res.statusText}`);\n  return res.json();\n};\n\napi.runOrchestra = async (tasksJsonPath, maxParallel = 5) => {\n  const res = await fetch(`${API_BASE}/api/workspace/orchestra/run`, {\n    method: 'POST', headers: { 'Content-Type': 'application/json' },\n    body: JSON.stringify({ tasks_json_path: tasksJsonPath, max_parallel: maxParallel })\n  });\n  if (!res.ok) throw new Error(`Orchestra run failed: ${res.statusText}`);\n  return res.json();\n};\n```",
+      "workdir": "/home/jarnura/projects/claude-orchestra",
+      "model": "haiku",
+      "effort": "low",
+      "status": "done",
+      "cost_usd": 0.056980699999999995
+    },
+    {
+      "id": "frontend-brainstorm-panel",
+      "name": "Frontend - Replace Quick Run with Brainstorm Panel",
+      "prompt": "Replace the \"Quick Run\" panel in `viewer/index.html` with a \"Brainstorm\" panel:\n\n1. Rename section from \"Quick Run\" to \"Brainstorm\"\n2. Change button from \"Run\" to \"Brainstorm\"\n3. Add a collapsible tasks.md editor below the brainstorm section:\n   - Textarea to show/edit generated tasks.md\n   - Save button\n   - Orchestra button (convert + run)\n\nNew structure:\n```html\n<div class=\"ws-brainstorm\">\n  <h3>Brainstorm</h3>\n  <div class=\"form-group\">\n    <textarea id=\"ws-brainstorm-prompt\" placeholder=\"Describe what you want to build...\"></textarea>\n  </div>\n  <div class=\"ws-brainstorm-row\">\n    <select id=\"ws-brainstorm-model\">\n      <option value=\"sonnet\" selected>sonnet</option>\n      <option value=\"opus\">opus</option>\n      <option value=\"haiku\">haiku</option>\n    </select>\n    <button class=\"btn btn-primary\" onclick=\"wsBrainstorm()\">Brainstorm</button>\n  </div>\n  \n  <!-- Tasks.md editor (hidden until brainstorm runs) -->\n  <div id=\"ws-tasks-md-container\" style=\"display:none\">\n    <div class=\"ws-tasks-md-header\">\n      <h4>tasks.md</h4>\n      <span id=\"ws-task-count\"></span>\n    </div>\n    <textarea id=\"ws-tasks-md\" class=\"code-editor\"></textarea>\n    <div class=\"ws-tasks-md-actions\">\n      <button class=\"btn\" onclick=\"wsSaveTasksMd()\">Save</button>\n      <button class=\"btn btn-success\" onclick=\"wsRunOrchestra()\">Orchestra</button>\n    </div>\n  </div>\n</div>\n```\n\nAdd JavaScript functions:\n- `wsBrainstorm()` - Call brainstorm API, show result in textarea\n- `wsSaveTasksMd()` - Save tasks.md content\n- `wsRunOrchestra()` - Convert + run orchestra, show confirmation\n\nRemove the old `wsQuickRun()` function.",
+      "workdir": "/home/jarnura/projects/claude-orchestra",
+      "model": "sonnet",
+      "effort": "high",
+      "status": "done",
+      "cost_usd": 0.43736564999999994
+    },
+    {
+      "id": "frontend-css-styling",
+      "name": "Frontend - CSS Styling for Brainstorm Panel",
+      "prompt": "Add CSS styles for the new Brainstorm panel in `viewer/index.html`:\n\n```css\n/* Brainstorm panel */\n.ws-brainstorm {\n  background: var(--surface);\n  border: 1px solid var(--border);\n  border-radius: 8px;\n  padding: 16px;\n  margin-bottom: 20px;\n}\n\n.ws-brainstorm h3 {\n  margin: 0 0 12px 0;\n  font-size: 1rem;\n  color: var(--text);\n}\n\n.ws-brainstorm-row {\n  display: flex;\n  gap: 12px;\n  align-items: center;\n}\n\n.ws-brainstorm-row select {\n  padding: 8px 12px;\n  border-radius: 4px;\n  border: 1px solid var(--border);\n  background: var(--bg);\n  color: var(--text);\n}\n\n/* Tasks.md editor */\n#ws-tasks-md-container {\n  margin-top: 16px;\n  border-top: 1px solid var(--border);\n  padding-top: 16px;\n}\n\n.ws-tasks-md-header {\n  display: flex;\n  justify-content: space-between;\n  align-items: center;\n  margin-bottom: 8px;\n}\n\n#ws-tasks-md {\n  width: 100%;\n  min-height: 200px;\n  max-height: 400px;\n  font-family: var(--mono);\n  font-size: 0.8rem;\n  padding: 12px;\n  border: 1px solid var(--border);\n  border-radius: 4px;\n  background: var(--bg);\n  color: var(--text);\n  resize: vertical;\n}\n\n.ws-tasks-md-actions {\n  display: flex;\n  gap: 8px;\n  margin-top: 8px;\n}\n\n.ws-brainstorm.loading button {\n  opacity: 0.6;\n  pointer-events: none;\n}\n```\n\nReplace old `.ws-quickrun` CSS with the new `.ws-brainstorm` styles.",
+      "workdir": "/home/jarnura/projects/claude-orchestra",
+      "model": "haiku",
+      "effort": "low",
+      "status": "done",
+      "cost_usd": 0.045235700000000004
+    }
+  ]
+}

@@ -5,7 +5,7 @@ set -eo pipefail
 # Runs multiple Claude Code sessions from a tasks JSON file in parallel,
 # with optional agent/skill/hook injection from Everything-Claude-Code.
 
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
 BIN_DIR="$SCRIPT_DIR"
 ORCHESTRA_DIR="$(dirname "$BIN_DIR")"
 LIB_DIR="$ORCHESTRA_DIR/lib"
