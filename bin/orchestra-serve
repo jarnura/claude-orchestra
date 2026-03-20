@@ -895,6 +895,8 @@ class OrchestraHandler(BaseHTTPRequestHandler):
             self._api_workspace_orchestra_run()
         elif m := re.match(r"^/api/workspace/runs/([^/]+)/cancel$", path):
             self._api_workspace_run_cancel(m.group(1))
+        elif m := re.match(r"^/api/pipelines/templates/([^/]+)/create$", path):
+            self._api_pipeline_template_create(m.group(1))
         else:
             self._not_found()
 
@@ -1271,6 +1273,42 @@ class OrchestraHandler(BaseHTTPRequestHandler):
                     "file": f"pipelines/{f.name}",
                 })
         self._json({"templates": templates})
+
+    def _api_pipeline_template_create(self, template_name: str):
+        """POST /api/pipelines/templates/{name}/create — copy template to dest_dir."""
+        body = self._read_body_json()
+        if body is None:
+            return
+        dest_dir_str = body.get("dest_dir", ".")
+        
+        # Validate destination directory
+        dest_dir = _validate_workspace_path(dest_dir_str)
+        if dest_dir is None or not dest_dir.is_dir():
+            self._error(400, "Invalid or non-existent dest_dir")
+            return
+        
+        # Find the template
+        template_file = ORCHESTRA_DIR / "templates" / "pipelines" / f"{template_name}.json"
+        if not template_file.is_file():
+            self._error(404, f"Template '{template_name}' not found")
+            return
+        
+        # Read template
+        try:
+            template_data = json.loads(template_file.read_text())
+        except json.JSONDecodeError as e:
+            self._error(500, f"Invalid template JSON: {e}")
+            return
+        
+        # Write to destination
+        dest_file = dest_dir / f"pipeline-{template_name}.json"
+        try:
+            dest_file.write_text(json.dumps(template_data, indent=2))
+        except Exception as e:
+            self._error(500, f"Failed to write pipeline: {e}")
+            return
+        
+        self._json({"path": str(dest_file), "name": template_name})
 
     def _api_pipeline_docs(self):
         how_to_write = (
