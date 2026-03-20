@@ -159,7 +159,10 @@ fi
 # Create slug from pipeline name for human-readable IDs
 PIPELINE_NAME_SLUG=$(echo "$PIPELINE_NAME" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/-/g' | sed 's/-\+/-/g' | sed 's/^-\|-$//g' | cut -c1-40)
 PIPELINE_ID="${PIPELINE_NAME_SLUG}"
-LOGS_BASE="$(pwd)/logs"
+# Use LOGS_BASE from environment if set (passed by orchestra-serve), otherwise use $(pwd)/logs
+if [[ -z "$LOGS_BASE" ]]; then
+    LOGS_BASE="$(pwd)/logs"
+fi
 mkdir -p "$LOGS_BASE"
 PIPELINE_STATE_FILE="$LOGS_BASE/${PIPELINE_ID}.json"
 
