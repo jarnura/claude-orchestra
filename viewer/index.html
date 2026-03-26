@@ -334,6 +334,17 @@ pre:hover .copy-btn { opacity: 1; }
 #ws-tasks-md { width: 100%; min-height: 200px; max-height: 400px; font-family: var(--mono); font-size: 0.8rem; padding: 12px; border: 1px solid var(--border); border-radius: 4px; background: var(--bg); color: var(--text); resize: vertical; }
 .ws-tasks-md-actions { display: flex; gap: 8px; margin-top: 8px; }
 .ws-brainstorm.loading button { opacity: 0.6; pointer-events: none; }
+.ws-progress { font-family: var(--mono); font-size: 0.75rem; color: var(--accent); padding: 6px 0 0; min-height: 18px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ws-brainstorm-mode-fields { margin-top: 10px; display: flex; flex-direction: column; gap: 8px; }
+.ws-brainstorm-mode-fields input { background: var(--bg); border: 1px solid var(--border); color: var(--text); padding: 8px 12px; border-radius: 4px; font-family: var(--mono); font-size: 0.8rem; outline: none; width: 100%; }
+.ws-brainstorm-mode-fields input:focus { border-color: var(--accent); }
+.ws-brainstorm-mode-fields label { font-size: 0.75rem; color: var(--text-muted); margin-bottom: 2px; }
+.ws-repo-pipelines { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 16px; margin-bottom: 20px; }
+.ws-repo-pipelines h3 { margin: 0 0 12px 0; font-size: 1rem; color: var(--text); }
+.ws-pipeline-list { display: flex; flex-direction: column; gap: 8px; }
+.ws-pipeline-item { display: flex; align-items: center; gap: 12px; padding: 10px 12px; background: var(--bg); border-radius: 4px; }
+.ws-pipeline-name { font-family: var(--mono); font-size: 0.85rem; flex: 1; }
+.ws-pipeline-stages { font-size: 0.75rem; color: var(--text-muted); }
 .ws-empty { text-align: center; color: var(--text-muted); padding: 40px; font-family: var(--mono); font-size: 0.85rem; }
 /* Active runs panel */
 .ws-active-runs { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 16px; margin-bottom: 20px; }
@@ -654,6 +665,30 @@ const api = {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}'
     });
     if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.error || `Failed: ${r.status}`); }
+    return r.json();
+  },
+  async runPipeline(pipelinePath, maxParallel = 3) {
+    const r = await fetch(`${API_BASE}/api/workspace/pipeline/run`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ pipeline_path: pipelinePath, max_parallel: maxParallel })
+    });
+    if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.error || `Pipeline run failed: ${r.status}`); }
+    return r.json();
+  },
+  async brainstormPipeline(repoPath, prompt, options = {}) {
+    const r = await fetch(`${API_BASE}/api/workspace/brainstorm/pipeline`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ repo_path: repoPath, prompt, ...options })
+    });
+    if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.error || `Brainstorm pipeline failed: ${r.status}`); }
+    return r.json();
+  },
+  async brainstormStage(repoPath, pipelinePath, stageName, prompt) {
+    const r = await fetch(`${API_BASE}/api/workspace/brainstorm/stage`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ repo_path: repoPath, pipeline_path: pipelinePath, stage_name: stageName, prompt })
+    });
+    if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.error || `Brainstorm stage failed: ${r.status}`); }
     return r.json();
   }
 };
@@ -1506,7 +1541,7 @@ function configShowEditorModal(title, name, body, scope, onSave, isNew) {
 }
 
 // ── Workspace Screen ──
-const wsState = { repos: null, selectedRepo: null, taskFiles: null, selectedFile: null, tasks: [], agents: null, skills: null, pipelineTemplates: null, pipelineDocs: null, activeRuns: [], activeRunsInterval: null };
+const wsState = { repos: null, selectedRepo: null, taskFiles: null, selectedFile: null, tasks: [], agents: null, skills: null, pipelineTemplates: null, pipelineDocs: null, activeRuns: [], activeRunsInterval: null, wsBrainstormMode: 'orchestra', wsProgressMessage: '', generatedTasksFile: null };
 
 async function renderWorkspaceScreen() {
   const app = $('#app');
@@ -1547,6 +1582,23 @@ async function renderWorkspaceScreen() {
       </div>
     </div>`;
 
+    // ── Available Pipelines ──
+    const repoPipelines = (wsState.repoPipelines || []);
+    html += `<div class="ws-section ws-repo-pipelines">
+      <h3>Pipelines</h3>
+      ${repoPipelines.length === 0 ? '<div class="ws-empty" style="padding:12px;color:var(--text-dim)">No pipelines in this repo. Use a template above to create one.</div>' : `
+        <div class="ws-pipeline-list">
+          ${repoPipelines.map(p => `
+            <div class="ws-pipeline-item">
+              <span class="ws-pipeline-name">${escapeHtml(p.name || p.file)}</span>
+              <span class="ws-pipeline-stages">${p.stages || 0} stages</span>
+              <button class="btn btn-sm btn-success" onclick="wsRunPipeline('${escapeHtml(p.path)}')">Run</button>
+            </div>
+          `).join('')}
+        </div>
+      `}
+    </div>`;
+
     // ── Active Runs ──
     html += `<div class="ws-active-runs">
       <h3>Active Runs</h3>
@@ -1554,8 +1606,21 @@ async function renderWorkspaceScreen() {
     </div>`;
 
     // ── Brainstorm Panel ──
+    const bsMode = wsState.wsBrainstormMode || 'orchestra';
     html += `<div class="ws-brainstorm">
       <h3>Brainstorm</h3>
+      <div class="ws-brainstorm-row" style="margin-bottom:10px">
+        <label style="font-size:0.8rem;color:var(--text-muted);white-space:nowrap">Mode</label>
+        <select id="ws-brainstorm-mode" onchange="wsRenderBrainstormModeFields()" style="flex:1">
+          <option value="orchestra" ${bsMode === 'orchestra' ? 'selected' : ''}>Orchestra</option>
+          <option value="pipeline-template" ${bsMode === 'pipeline-template' ? 'selected' : ''}>Pipeline: Template</option>
+          <option value="pipeline-custom" ${bsMode === 'pipeline-custom' ? 'selected' : ''}>Pipeline: Custom</option>
+          <option value="stage-tasks" ${bsMode === 'stage-tasks' ? 'selected' : ''}>Stage Tasks</option>
+        </select>
+      </div>
+      <div id="ws-brainstorm-mode-fields">
+        ${wsBrainstormModeFieldsHtml(bsMode)}
+      </div>
       <div class="form-group">
         <textarea id="ws-brainstorm-prompt" class="form-textarea" style="min-height:60px;max-height:120px" placeholder="Describe what you want to build..."></textarea>
       </div>
@@ -1565,12 +1630,14 @@ async function renderWorkspaceScreen() {
           <option value="opus">opus</option>
           <option value="haiku">haiku</option>
         </select>
-        <button class="btn btn-primary" onclick="wsBrainstorm()">Brainstorm</button>
+        <button id="ws-brainstorm-btn" class="btn btn-primary" onclick="wsBrainstorm()">${wsBrainstormBtnLabel(bsMode)}</button>
       </div>
+
+      <div class="ws-progress" id="wsBrainstormProgress">${escapeHtml(wsState.wsProgressMessage || '')}</div>
 
       <div id="ws-tasks-md-container" style="display:none">
         <div class="ws-tasks-md-header">
-          <h4>tasks.md</h4>
+          <h4 id="ws-tasks-md-filename" style="font-family:var(--mono);font-size:0.85rem;color:var(--accent)">tasks.md</h4>
           <span id="ws-task-count"></span>
         </div>
         <textarea id="ws-tasks-md" class="code-editor"></textarea>
@@ -1626,6 +1693,7 @@ async function wsSelectRepo(repoPath) {
   wsState.selectedFile = null;
   wsState.tasks = [];
   wsState.activeRuns = [];
+  wsState.generatedTasksFile = null;
   await renderWorkspaceScreen();
 }
 
@@ -1633,6 +1701,7 @@ async function wsLoadRepoTasks(repoPath) {
   try {
     const data = await api.getRepoTasks(repoPath);
     wsState.taskFiles = data.task_files || [];
+    wsState.repoPipelines = data.pipelines || [];
     if (wsState.taskFiles.length > 0 && !wsState.selectedFile) {
       wsState.selectedFile = wsState.taskFiles[0].path;
     }
@@ -2018,7 +2087,169 @@ async function wsShowTaskModal(task, isNew) {
   document.addEventListener('keydown', escHandler);
 }
 
+function wsSetProgress(msg) {
+  wsState.wsProgressMessage = msg;
+  const el = $('#wsBrainstormProgress');
+  if (el) el.textContent = msg;
+}
+
+function wsBrainstormBtnLabel(mode) {
+  if (mode === 'stage-tasks') return 'Generate';
+  if (mode === 'pipeline-template' || mode === 'pipeline-custom') return 'Generate & Run';
+  return 'Brainstorm & Edit';
+}
+
+function wsBrainstormModeFieldsHtml(mode) {
+  if (mode === 'pipeline-template') {
+    return `<div class="ws-brainstorm-mode-fields" style="margin-bottom:10px">
+      <select id="ws-bs-template-name" style="width:100%">
+        <option value="feature">feature</option>
+        <option value="bugfix">bugfix</option>
+        <option value="audit">audit</option>
+        <option value="refactor">refactor</option>
+        <option value="release">release</option>
+      </select>
+    </div>`;
+  }
+  if (mode === 'pipeline-custom') {
+    return `<div class="ws-brainstorm-mode-fields" style="margin-bottom:10px">
+      <label>Pipeline name</label>
+      <input id="ws-bs-pipeline-name" placeholder="my-pipeline">
+      <label>Stages (comma-separated)</label>
+      <input id="ws-bs-stages" placeholder="Plan, Implement, Review">
+    </div>`;
+  }
+  if (mode === 'stage-tasks') {
+    const pipelines = wsState.repoPipelines || [];
+    const pipelineOpts = pipelines.length > 0
+      ? pipelines.map(p => `<option value="${escapeHtml(p.path)}">${escapeHtml(p.name || p.file)}</option>`).join('')
+      : '<option value="">— no pipelines —</option>';
+    const firstPipeline = pipelines[0];
+    const stageNames = (firstPipeline && firstPipeline.stage_names) || [];
+    const stageOpts = stageNames.length > 0
+      ? stageNames.map(s => `<option value="${escapeHtml(s)}">${escapeHtml(s)}</option>`).join('')
+      : '<option value="">— select pipeline first —</option>';
+    return `<div class="ws-brainstorm-mode-fields" style="margin-bottom:10px">
+      <label>Pipeline</label>
+      <select id="ws-bs-pipeline-path" onchange="wsRenderBrainstormStageDropdown()">${pipelineOpts}</select>
+      <label>Stage</label>
+      <select id="ws-bs-stage-name">${stageOpts}</select>
+    </div>`;
+  }
+  return '';
+}
+
+function wsRenderBrainstormModeFields() {
+  const modeEl = $('#ws-brainstorm-mode');
+  if (!modeEl) return;
+  const mode = modeEl.value;
+  wsState.wsBrainstormMode = mode;
+  const fieldsEl = $('#ws-brainstorm-mode-fields');
+  if (fieldsEl) fieldsEl.innerHTML = wsBrainstormModeFieldsHtml(mode);
+  const btnEl = $('#ws-brainstorm-btn');
+  if (btnEl) btnEl.textContent = wsBrainstormBtnLabel(mode);
+}
+
+function wsRenderBrainstormStageDropdown() {
+  const pipelineEl = $('#ws-bs-pipeline-path');
+  const stageEl = $('#ws-bs-stage-name');
+  if (!pipelineEl || !stageEl) return;
+  const pipeline = (wsState.repoPipelines || []).find(p => p.path === pipelineEl.value);
+  const stages = (pipeline && pipeline.stage_names) || [];
+  stageEl.innerHTML = stages.length > 0
+    ? stages.map(s => `<option value="${escapeHtml(s)}">${escapeHtml(s)}</option>`).join('')
+    : '<option value="">— no stages —</option>';
+}
+
+async function wsBrainstormPipelineTemplate() {
+  const promptEl = $('#ws-brainstorm-prompt');
+  const templateEl = $('#ws-bs-template-name');
+  if (!promptEl?.value.trim()) { alert('Enter a prompt'); return; }
+  if (!templateEl?.value.trim()) { alert('Enter a template name'); return; }
+  if (!wsState.selectedRepo) { alert('Select a repository first'); return; }
+  const panel = promptEl.closest('.ws-brainstorm');
+  panel.classList.add('loading');
+  wsSetProgress('Generating pipeline tasks...');
+  try {
+    const result = await api.brainstormPipeline(wsState.selectedRepo, promptEl.value.trim(), { template_name: templateEl.value.trim() });
+    const stages = result.stages || [];
+    for (let i = 0; i < stages.length; i++) {
+      wsSetProgress(`Generating tasks for Stage ${i + 1}/${stages.length}: ${stages[i].name || stages[i].file || ''}...`);
+    }
+    if (stages.length) wsSetProgress(`Generated ${stages.length} stage${stages.length !== 1 ? 's' : ''}. Starting pipeline...`);
+    const runResult = await api.runPipeline(result.pipeline_path || result.path);
+    wsSetProgress(`Pipeline started! Run ID: ${runResult.run_id || 'unknown'}`);
+    wsLoadActiveRuns();
+    location.hash = '#/runs';
+  } catch (e) {
+    wsSetProgress('');
+    alert('Brainstorm pipeline failed: ' + e.message);
+  } finally {
+    panel.classList.remove('loading');
+  }
+}
+
+async function wsBrainstormPipelineCustom() {
+  const promptEl = $('#ws-brainstorm-prompt');
+  const pipelineNameEl = $('#ws-bs-pipeline-name');
+  const stagesEl = $('#ws-bs-stages');
+  if (!promptEl?.value.trim()) { alert('Enter a prompt'); return; }
+  if (!stagesEl?.value.trim()) { alert('Enter stages (comma-separated)'); return; }
+  if (!wsState.selectedRepo) { alert('Select a repository first'); return; }
+  const stages = stagesEl.value.split(',').map(s => s.trim()).filter(Boolean);
+  if (!stages.length) { alert('Enter at least one stage'); return; }
+  const panel = promptEl.closest('.ws-brainstorm');
+  panel.classList.add('loading');
+  wsSetProgress('Generating pipeline tasks...');
+  try {
+    const body = { stages };
+    if (pipelineNameEl?.value.trim()) body.pipeline_name = pipelineNameEl.value.trim();
+    const result = await api.brainstormPipeline(wsState.selectedRepo, promptEl.value.trim(), body);
+    const resultStages = result.stages || [];
+    for (let i = 0; i < resultStages.length; i++) {
+      wsSetProgress(`Generating tasks for Stage ${i + 1}/${resultStages.length}: ${resultStages[i].name || resultStages[i].file || ''}...`);
+    }
+    if (resultStages.length) wsSetProgress(`Generated ${resultStages.length} stage${resultStages.length !== 1 ? 's' : ''}. Starting pipeline...`);
+    const runResult = await api.runPipeline(result.pipeline_path || result.path);
+    wsSetProgress(`Pipeline started! Run ID: ${runResult.run_id || 'unknown'}`);
+    wsLoadActiveRuns();
+    location.hash = '#/runs';
+  } catch (e) {
+    wsSetProgress('');
+    alert('Brainstorm pipeline failed: ' + e.message);
+  } finally {
+    panel.classList.remove('loading');
+  }
+}
+
+async function wsBrainstormStage() {
+  const promptEl = $('#ws-brainstorm-prompt');
+  const pipelinePathEl = $('#ws-bs-pipeline-path');
+  const stageNameEl = $('#ws-bs-stage-name');
+  if (!promptEl?.value.trim()) { alert('Enter a prompt'); return; }
+  if (!pipelinePathEl?.value.trim()) { alert('Enter the pipeline path'); return; }
+  if (!stageNameEl?.value.trim()) { alert('Enter the stage name'); return; }
+  if (!wsState.selectedRepo) { alert('Select a repository first'); return; }
+  const panel = promptEl.closest('.ws-brainstorm');
+  panel.classList.add('loading');
+  wsSetProgress('Generating tasks...');
+  try {
+    const result = await api.brainstormStage(wsState.selectedRepo, pipelinePathEl.value.trim(), stageNameEl.value.trim(), promptEl.value.trim());
+    wsSetProgress(`Tasks generated: ${result.tasks_path || result.file || 'done'}`);
+  } catch (e) {
+    wsSetProgress('');
+    alert('Brainstorm stage failed: ' + e.message);
+  } finally {
+    panel.classList.remove('loading');
+  }
+}
+
 async function wsBrainstorm() {
+  const mode = wsState.wsBrainstormMode || 'orchestra';
+  if (mode === 'pipeline-template') return wsBrainstormPipelineTemplate();
+  if (mode === 'pipeline-custom') return wsBrainstormPipelineCustom();
+  if (mode === 'stage-tasks') return wsBrainstormStage();
+
   const promptEl = $('#ws-brainstorm-prompt');
   const modelEl = $('#ws-brainstorm-model');
   if (!promptEl || !promptEl.value.trim()) { alert('Enter a prompt'); return; }
@@ -2026,16 +2257,25 @@ async function wsBrainstorm() {
 
   const panel = promptEl.closest('.ws-brainstorm');
   panel.classList.add('loading');
+  wsSetProgress('Generating tasks...');
   try {
     const result = await api.brainstorm(wsState.selectedRepo, promptEl.value.trim(), modelEl.value);
+    wsSetProgress('');
+    wsState.generatedTasksFile = result.tasks_file || null;
     const container = $('#ws-tasks-md-container');
     const tasksMdEl = $('#ws-tasks-md');
     const taskCountEl = $('#ws-task-count');
+    const fileHeaderEl = $('#ws-tasks-md-filename');
     tasksMdEl.value = result.tasks_md || '';
     const taskCount = (result.tasks_md || '').split('\n').filter(l => l.startsWith('## ')).length;
     taskCountEl.textContent = taskCount ? `${taskCount} task${taskCount !== 1 ? 's' : ''}` : '';
+    if (fileHeaderEl && result.tasks_filename) {
+      fileHeaderEl.textContent = result.tasks_filename;
+      fileHeaderEl.title = result.tasks_file || '';
+    }
     container.style.display = 'block';
   } catch (e) {
+    wsSetProgress('');
     alert('Brainstorm failed: ' + e.message);
   } finally {
     panel.classList.remove('loading');
@@ -2045,10 +2285,11 @@ async function wsBrainstorm() {
 async function wsSaveTasksMd() {
   const tasksMdEl = $('#ws-tasks-md');
   if (!wsState.selectedRepo) { alert('Select a repository first'); return; }
-  const filePath = wsState.selectedRepo + '/tasks.md';
+  const filePath = wsState.generatedTasksFile || (wsState.selectedRepo + '/tasks.md');
   try {
     await api.saveTasksMd(filePath, tasksMdEl.value);
-    alert('tasks.md saved.');
+    const filename = filePath.split('/').pop();
+    alert(`${filename} saved.`);
   } catch (e) {
     alert('Save failed: ' + e.message);
   }
@@ -2057,8 +2298,9 @@ async function wsSaveTasksMd() {
 async function wsRunOrchestra() {
   if (!wsState.selectedRepo) { alert('Select a repository first'); return; }
   const tasksMdEl = $('#ws-tasks-md');
-  const tasksMdPath = wsState.selectedRepo + '/tasks.md';
-  const tasksJsonPath = wsState.selectedRepo + '/tasks.json';
+  const tasksMdPath = wsState.generatedTasksFile || (wsState.selectedRepo + '/tasks.md');
+  const baseName = tasksMdPath.replace(/\.md$/, '');
+  const tasksJsonPath = baseName + '.json';
   try {
     await api.saveTasksMd(tasksMdPath, tasksMdEl.value);
     await api.convertTasksMd(tasksMdPath, tasksJsonPath);
@@ -2069,6 +2311,18 @@ async function wsRunOrchestra() {
     await wsLoadRepoTasks(wsState.selectedRepo);
   } catch (e) {
     alert('Orchestra failed: ' + e.message);
+  }
+}
+
+async function wsRunPipeline(pipelinePath) {
+  if (!pipelinePath) { alert('No pipeline specified'); return; }
+  if (!confirm(`Run pipeline: ${pipelinePath}?\n\nThis will execute the pipeline stages sequentially.`)) return;
+  try {
+    const result = await api.runPipeline(pipelinePath);
+    alert(`Pipeline started! Run ID: ${result.run_id || 'unknown'}\nCheck the Runs tab.`);
+    wsLoadActiveRuns();
+  } catch (e) {
+    alert('Pipeline failed: ' + e.message);
   }
 }
 

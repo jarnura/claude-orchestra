@@ -59,6 +59,8 @@ HOOK_PROFILES = {
     },
 }
 
+VALID_PIPELINE_TEMPLATES = {"feature", "bugfix", "audit", "refactor", "release"}
+
 # Workspace: directories to scan for repos
 WORKSPACE_SCAN_DIRS = [
     Path.home() / "projects",
@@ -120,6 +122,46 @@ Rules:
 - Each task should be self-contained and independently executable
 
 Respond ONLY with the task list in markdown format. Start immediately with ##."""
+
+BRAINSTORM_PIPELINE_SYSTEM_PROMPT = """You are a pipeline architecture expert. Your ONLY job is to design a multi-stage sequential pipeline for user requests.
+
+CRITICAL INSTRUCTIONS:
+- DO NOT implement anything
+- DO NOT write code
+- DO NOT explain what you would do
+- ONLY output a valid JSON object (no markdown code fences, no prose)
+
+Output a JSON object with this EXACT structure:
+{
+  "name": "Descriptive Pipeline Name",
+  "stages": [
+    {
+      "name": "Stage Name",
+      "pass_outputs_to_next": true,
+      "tasks": [
+        {
+          "id": "task-slug-lowercase-hyphenated",
+          "name": "Task Name",
+          "prompt": "Detailed task description. Mention specific files when possible.",
+          "model": "sonnet",
+          "workdir": "{repo_path}"
+        }
+      ]
+    }
+  ]
+}
+
+Rules:
+- Generate 2-4 pipeline stages that must run sequentially
+- Each stage can have 1-5 parallel tasks
+- Use model: opus for complex architecture/planning, sonnet for implementation, haiku for simple checks
+- Set pass_outputs_to_next: true for all stages except the last one
+- task id must be lowercase letters and hyphens only (no spaces, no underscores, no numbers at start)
+- Be specific in task prompts — mention exact files when possible
+- Each task must be self-contained and executable within its stage
+- workdir must always be {repo_path}
+
+Respond ONLY with the raw JSON object. No markdown, no code blocks, no explanation."""
 
 # ---------------------------------------------------------------------------
 # User model — file-based storage in <data_dir>/users.json
@@ -330,6 +372,139 @@ def _task_file_summary(f: Path) -> dict:
         }
     except Exception:
         return {"path": str(f), "name": f.stem, "task_counts": {"total": 0}}
+
+
+def _is_pipeline_file(f: Path) -> bool:
+    """Check if a JSON file is a pipeline (has 'stages' array, not 'tasks')."""
+    try:
+        data = json.loads(f.read_text())
+        return isinstance(data.get("stages"), list) and "tasks" not in data
+    except Exception:
+        return False
+
+
+def _pipeline_file_summary(f: Path) -> dict:
+    """Summarize a pipeline file."""
+    try:
+        data = json.loads(f.read_text())
+        stages = data.get("stages", [])
+        return {
+            "path": str(f),
+            "name": data.get("name", f.stem),
+            "stages": len(stages),
+            "stage_names": [s.get("name", f"Stage {i+1}") for i, s in enumerate(stages)],
+            "aggregate": data.get("aggregate", False),
+        }
+    except Exception:
+        return {"path": str(f), "name": f.stem, "stages": 0}
+
+
+def _find_pipeline_files(repo_path: Path) -> list[dict]:
+    """Find pipeline JSON files in a repo directory."""
+    results = []
+    if not repo_path.is_dir():
+        return results
+    # Check root-level JSON files matching pipeline-*.json
+    for f in sorted(repo_path.glob("pipeline*.json")):
+        if _is_pipeline_file(f):
+            results.append(_pipeline_file_summary(f))
+    # Check pipelines/ subdirectory
+    pipelines_dir = repo_path / "pipelines"
+    if pipelines_dir.is_dir():
+        for f in sorted(pipelines_dir.glob("*.json")):
+            if _is_pipeline_file(f):
+                results.append(_pipeline_file_summary(f))
+    return results
+
+
+def _get_repo_context(repo_path: Path) -> str:
+    """Gather context about a repo for brainstorm task generation."""
+    context_parts = []
+
+    # Detect languages by file extensions - limit scan to avoid slow traversal
+    extensions = {}
+    scan_limit = 1000  # Max files to scan
+    count = 0
+    for f in repo_path.rglob("*"):
+        if count >= scan_limit:
+            break
+        if f.is_file() and not f.name.startswith("."):
+            ext = f.suffix.lower()
+            if ext:
+                extensions[ext] = extensions.get(ext, 0) + 1
+            count += 1
+    if extensions:
+        top_exts = sorted(extensions.items(), key=lambda x: -x[1])[:5]
+        langs = ", ".join(f"{ext}({count})" for ext, count in top_exts if ext)
+        if langs:
+            context_parts.append(f"Languages: {langs}")
+
+    # Check for key config files
+    key_files = []
+    configs = [
+        "package.json", "Cargo.toml", "pyproject.toml", "go.mod",
+        "build.gradle", "pom.xml", "Makefile", "CLAUDE.md", "README.md",
+    ]
+    for cfg in configs:
+        if (repo_path / cfg).exists():
+            key_files.append(cfg)
+    if key_files:
+        context_parts.append(f"Key Files: {', '.join(key_files)}")
+
+    # List top-level directories
+    dirs = [d.name for d in repo_path.iterdir() if d.is_dir() and not d.name.startswith(".")]
+    if dirs:
+        context_parts.append(f"Structure: {', '.join(sorted(dirs)[:6])}")
+
+    return "\n".join(context_parts) if context_parts else ""
+
+
+def _stage_slug(name: str) -> str:
+    """Convert a stage name to a file-safe slug."""
+    return re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
+
+
+def _convert_tasks_md_to_json(tasks_md: str) -> dict:
+    """Convert tasks markdown to tasks JSON dict (mirrors orchestra-convert logic)."""
+    sections = re.split(r"^## ", tasks_md, flags=re.MULTILINE)[1:]
+    tasks = []
+    for section in sections:
+        lines = section.strip().split("\n")
+        name = lines[0].strip()
+        task_id = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")[:30].rstrip("-")
+
+        meta: dict = {}
+        prompt_lines: list[str] = []
+        in_prompt = False
+
+        for line in lines[1:]:
+            stripped = line.strip()
+            if not in_prompt and re.match(r"^- \w+:", stripped):
+                key, val = stripped[2:].split(":", 1)
+                meta[key.strip()] = val.strip()
+            elif stripped == "":
+                if not in_prompt:
+                    in_prompt = True
+                else:
+                    prompt_lines.append("")
+            else:
+                in_prompt = True
+                prompt_lines.append(line)
+
+        task: dict = {
+            "id": task_id,
+            "name": name,
+            "prompt": "\n".join(prompt_lines).strip(),
+            "workdir": meta.get("workdir", "."),
+            "model": meta.get("model", "opus"),
+            "effort": meta.get("effort", "high"),
+            "status": "pending",
+        }
+        for field in ("allowedTools", "appendSystemPrompt", "agents", "skills", "hooks"):
+            if field in meta:
+                task[field] = meta[field]
+        tasks.append(task)
+    return {"tasks": tasks}
 
 
 def _load_tasks_file(file_path: Path) -> tuple[dict | None, str | None]:
@@ -889,10 +1064,18 @@ class OrchestraHandler(BaseHTTPRequestHandler):
             self._api_workspace_task_run(m.group(1))
         elif path == "/api/workspace/brainstorm":
             self._api_workspace_brainstorm()
+        elif path == "/api/workspace/brainstorm/pipeline":
+            self._api_workspace_brainstorm_pipeline()
+        elif path == "/api/workspace/brainstorm/stage":
+            self._api_workspace_brainstorm_stage()
+        elif path == "/api/workspace/brainstorm/pipeline/run":
+            self._api_workspace_brainstorm_pipeline_run()
         elif path == "/api/workspace/tasks-md/convert":
             self._api_workspace_tasks_md_convert()
         elif path == "/api/workspace/orchestra/run":
             self._api_workspace_orchestra_run()
+        elif path == "/api/workspace/pipeline/run":
+            self._api_workspace_pipeline_run()
         elif m := re.match(r"^/api/workspace/runs/([^/]+)/cancel$", path):
             self._api_workspace_run_cancel(m.group(1))
         elif m := re.match(r"^/api/pipelines/templates/([^/]+)/create$", path):
@@ -1191,6 +1374,15 @@ class OrchestraHandler(BaseHTTPRequestHandler):
             self._not_found()
             return
         data = json.loads(pf.read_text())
+        logs_dir = pf.parent  # logs/ directory
+        
+        # Get the source pipeline file directory for resolving task files
+        pipeline_file = data.get("pipeline_file")
+        if pipeline_file:
+            pipeline_base_dir = Path(pipeline_file).parent
+        else:
+            pipeline_base_dir = logs_dir
+        
         stages = []
         total_cost = None
         for stage in data.get("stages", []):
@@ -1198,6 +1390,8 @@ class OrchestraHandler(BaseHTTPRequestHandler):
             run_ids = stage.get("run_ids", [])
             stage_tasks = []
             stage_cost = None
+            
+            # Load tasks from run directories (if pipeline has been run)
             for run_id in run_ids:
                 run_dir = self.logs_dir / run_id
                 sf = run_dir / "state.json"
@@ -1211,6 +1405,41 @@ class OrchestraHandler(BaseHTTPRequestHandler):
                             stage_tasks.append({**t, "run_id": run_id})
                     except Exception:
                         pass
+            
+            # If no run_ids or no tasks found, try loading from referenced task files
+            if not stage_tasks:
+                # Handle both 'tasks' (array of dicts with file key) and 'task_files' (array of strings)
+                task_refs = stage.get("tasks", [])
+                task_files = stage.get("task_files", [])
+                
+                # Normalize to list of file names
+                file_names = []
+                for task_ref in task_refs:
+                    if isinstance(task_ref, dict) and "file" in task_ref:
+                        file_names.append(task_ref["file"])
+                    elif isinstance(task_ref, str):
+                        file_names.append(task_ref)
+                for tf in task_files:
+                    if isinstance(tf, str):
+                        file_names.append(tf)
+                
+                for task_file_name in file_names:
+                    # Try multiple locations for the task file
+                    task_file_paths = [
+                        pipeline_base_dir / task_file_name,  # Same directory as source pipeline file
+                        Path(task_file_name),  # Absolute path
+                        logs_dir / task_file_name,  # logs/ directory
+                    ]
+                    for task_file in task_file_paths:
+                        if task_file.exists():
+                            try:
+                                tf_data = json.loads(task_file.read_text())
+                                for t in tf_data.get("tasks", []):
+                                    stage_tasks.append({**t, "source": str(task_file)})
+                            except Exception:
+                                pass
+                            break
+            
             enriched["tasks"] = stage_tasks
             enriched["cost_usd"] = stage_cost
             if stage_cost is not None:
@@ -1583,6 +1812,7 @@ class OrchestraHandler(BaseHTTPRequestHandler):
             self._not_found()
             return
         task_files = _find_task_files(repo_path)
+        pipeline_files = _find_pipeline_files(repo_path)
 
         # Check if tasks.md exists and read its content
         tasks_md_path = repo_path / "tasks.md"
@@ -1608,7 +1838,8 @@ class OrchestraHandler(BaseHTTPRequestHandler):
         self._json({
             "repo": str(repo_path),
             "task_files": task_files,
-            "tasks_md": tasks_md
+            "tasks_md": tasks_md,
+            "pipelines": pipeline_files
         })
 
     def _api_workspace_tasks_file(self):
@@ -1893,9 +2124,20 @@ class OrchestraHandler(BaseHTTPRequestHandler):
             return
 
         system_prompt = BRAINSTORM_SYSTEM_PROMPT.replace("{repo_path}", str(repo_path))
-        
-        # Structure the user prompt to make it clear this is a decomposition request
-        full_prompt = f"Decompose this request into parallel tasks:\n\n{prompt}"
+
+        # Gather repo context for better task generation
+        repo_name = repo_path.name
+        repo_context = _get_repo_context(repo_path)
+
+        # Structure the user prompt with explicit repo context to prevent model from using wrong project
+        full_prompt = f"""Target Repository: {repo_name}
+Repository Path: {repo_path}
+{repo_context}
+
+USER REQUEST:
+{prompt}
+
+CRITICAL: All tasks MUST have `workdir: {repo_path}` - the model must NOT use any other path. The target is "{repo_name}", not the current working directory."""
         
         try:
             result = subprocess.run(
@@ -1903,7 +2145,7 @@ class OrchestraHandler(BaseHTTPRequestHandler):
                 input=full_prompt,
                 capture_output=True,
                 text=True,
-                timeout=120,
+                timeout=300,  # 5 minutes for brainstorm
             )
         except FileNotFoundError:
             self._error(500, "claude CLI not found")
@@ -1924,8 +2166,12 @@ class OrchestraHandler(BaseHTTPRequestHandler):
         # Count tasks by counting ## headings
         task_count = sum(1 for line in tasks_md.splitlines() if line.startswith("## "))
 
-        # Save to repo_path/tasks.md atomically
-        tasks_file = repo_path / "tasks.md"
+        # Generate a descriptive filename from the prompt + timestamp
+        slug = re.sub(r"[^a-z0-9]+", "-", prompt.lower().strip())[:40].strip("-")
+        timestamp = int(time.time())
+        tasks_filename = f"tasks-{slug}-{timestamp}.md"
+        tasks_file = repo_path / tasks_filename
+
         tmp_fd, tmp_path = tempfile.mkstemp(dir=str(repo_path), suffix=".md.tmp")
         try:
             with os.fdopen(tmp_fd, "w") as f:
@@ -1937,13 +2183,429 @@ class OrchestraHandler(BaseHTTPRequestHandler):
                 os.unlink(tmp_path)
             except OSError:
                 pass
-            self._error(500, f"Failed to write tasks.md: {e}")
+            self._error(500, f"Failed to write {tasks_filename}: {e}")
             return
 
         self._json({
             "tasks_md": tasks_md,
             "tasks_file": str(tasks_file),
+            "tasks_filename": tasks_filename,
             "task_count": task_count,
+        })
+
+    def _api_workspace_brainstorm_pipeline_run(self):
+        """POST /api/workspace/brainstorm/pipeline/run — generate a pipeline via Claude and immediately run it."""
+        body = self._read_body_json()
+        if body is None:
+            return
+        repo_path_str = body.get("repo_path")
+        prompt = body.get("prompt")
+        model = body.get("model", "sonnet")
+        max_parallel = body.get("max_parallel", 3)
+
+        if not repo_path_str:
+            self._error(400, "Missing 'repo_path' field")
+            return
+        if not prompt or not isinstance(prompt, str):
+            self._error(400, "Missing or invalid 'prompt' field")
+            return
+        if not isinstance(model, str) or model not in ("opus", "sonnet", "haiku"):
+            self._error(400, "Invalid 'model'; must be opus, sonnet, or haiku")
+            return
+        if not isinstance(max_parallel, int) or max_parallel < 1 or max_parallel > 50:
+            self._error(400, "max_parallel must be an integer between 1 and 50")
+            return
+
+        repo_path = _validate_workspace_path(repo_path_str)
+        if repo_path is None or not repo_path.is_dir():
+            self._error(400, "Invalid or non-existent repo_path")
+            return
+
+        system_prompt = BRAINSTORM_PIPELINE_SYSTEM_PROMPT.replace("{repo_path}", str(repo_path))
+
+        repo_name = repo_path.name
+        repo_context = _get_repo_context(repo_path)
+        full_prompt = f"""Target Repository: {repo_name}
+Repository Path: {repo_path}
+{repo_context}
+
+USER REQUEST:
+{prompt}
+
+CRITICAL: All task workdir fields MUST be "{repo_path}". Generate a realistic multi-stage pipeline for this request."""
+
+        try:
+            result = subprocess.run(
+                ["claude", "--print", "--model", model, "--append-system-prompt", system_prompt],
+                input=full_prompt,
+                capture_output=True,
+                text=True,
+                timeout=300,
+            )
+        except FileNotFoundError:
+            self._error(500, "claude CLI not found")
+            return
+        except subprocess.TimeoutExpired:
+            self._error(504, "Claude CLI timed out")
+            return
+
+        if result.returncode != 0:
+            self._error(500, f"Claude CLI error: {result.stderr.strip()[:200]}")
+            return
+
+        raw = result.stdout.strip()
+        if not raw:
+            self._error(500, "Claude returned empty output")
+            return
+
+        # Strip markdown code fences if present
+        raw = re.sub(r"^```[a-z]*\n?", "", raw)
+        raw = re.sub(r"\n?```$", "", raw.rstrip())
+
+        try:
+            pipeline_spec = json.loads(raw)
+        except json.JSONDecodeError as e:
+            self._error(500, f"Claude returned invalid JSON: {e} — output: {raw[:300]}")
+            return
+
+        if "stages" not in pipeline_spec or not isinstance(pipeline_spec["stages"], list):
+            self._error(500, "Generated pipeline missing 'stages' array")
+            return
+
+        # Write per-stage task JSON files and build pipeline.json referencing them
+        timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+        pipeline_name = pipeline_spec.get("name", "Brainstorm Pipeline")
+        pipeline_slug = re.sub(r"[^a-z0-9]+", "-", pipeline_name.lower()).strip("-")
+        pipeline_dir = repo_path / f"pipeline-{pipeline_slug}-{timestamp}"
+        try:
+            pipeline_dir.mkdir(parents=True, exist_ok=True)
+        except OSError as e:
+            self._error(500, f"Failed to create pipeline directory: {e}")
+            return
+
+        pipeline_stages = []
+        total_tasks = 0
+        for i, stage_spec in enumerate(pipeline_spec["stages"]):
+            stage_name = stage_spec.get("name", f"Stage {i + 1}")
+            stage_slug = re.sub(r"[^a-z0-9]+", "-", stage_name.lower()).strip("-") or f"stage-{i + 1}"
+            inline_tasks = stage_spec.get("tasks", [])
+
+            normalised = []
+            for t in inline_tasks:
+                task_id = re.sub(r"[^a-z0-9-]", "-", str(t.get("id", stage_slug)).lower()).strip("-") or f"task-{i}"
+                normalised.append({
+                    "id": task_id,
+                    "name": t.get("name", task_id),
+                    "prompt": t.get("prompt", ""),
+                    "model": t.get("model", "sonnet"),
+                    "workdir": str(repo_path),
+                    "status": "pending",
+                })
+            total_tasks += len(normalised)
+
+            tasks_file = pipeline_dir / f"tasks-{stage_slug}.json"
+            tasks_file.write_text(json.dumps({"tasks": normalised}, indent=2))
+
+            pipeline_stages.append({
+                "name": stage_name,
+                "tasks": [{"file": str(tasks_file), "max_parallel": max_parallel}],
+                "pass_outputs_to_next": stage_spec.get(
+                    "pass_outputs_to_next", i < len(pipeline_spec["stages"]) - 1
+                ),
+            })
+
+        pipeline_json = {
+            "name": pipeline_name,
+            "stages": pipeline_stages,
+            "aggregate": True,
+        }
+        pipeline_path = pipeline_dir / "pipeline.json"
+        pipeline_path.write_text(json.dumps(pipeline_json, indent=2))
+
+        # Spawn orchestra-pipeline in the background
+        pipeline_bin = SCRIPT_DIR / "orchestra-pipeline"
+        if not pipeline_bin.exists():
+            self._error(500, "orchestra-pipeline binary not found")
+            return
+
+        run_id = datetime.now().strftime("%Y-%m-%d_%H-%M-%S") + "-" + uuid.uuid4().hex[:6]
+        log_dir = self.logs_dir / run_id
+        log_dir.mkdir(parents=True, exist_ok=True)
+
+        # Pass LOGS_BASE so orchestra-pipeline writes state file to our logs directory
+        env = {**os.environ, "LOGS_BASE": str(self.logs_dir), "MAX_PARALLEL": str(max_parallel)}
+        try:
+            proc = subprocess.Popen(
+                [str(pipeline_bin), str(pipeline_path)],
+                cwd=str(repo_path),
+                env=env,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                start_new_session=True,
+            )
+        except OSError as e:
+            self._error(500, f"Failed to spawn pipeline: {e}")
+            return
+
+        stage_count = len(pipeline_stages)
+        meta = {
+            "repo_path": str(repo_path),
+            "pid": proc.pid,
+            "source": "brainstorm-pipeline",
+            "task_name": f"Pipeline: {pipeline_name} ({stage_count} stages, {total_tasks} tasks)",
+            "started_at": int(time.time()),
+            "pipeline_path": str(pipeline_path),
+        }
+        (log_dir / "meta.json").write_text(json.dumps(meta))
+
+        started_at_iso = datetime.now(timezone.utc).isoformat()
+        metadata = {
+            "repo_path": str(repo_path),
+            "pipeline_file": str(pipeline_path),
+            "pipeline_name": pipeline_name,
+            "started_at": started_at_iso,
+            "triggered_from": "brainstorm-pipeline",
+            "prompt": prompt[:500],
+        }
+        (log_dir / "metadata.json").write_text(json.dumps(metadata, indent=2))
+
+        self._json_status(202, {
+            "run_id": run_id,
+            "log_dir": str(log_dir),
+            "pipeline": pipeline_name,
+            "pipeline_path": str(pipeline_path),
+            "stage_count": stage_count,
+            "task_count": total_tasks,
+        })
+
+    def _brainstorm_stage_tasks(
+        self, repo_path: Path, stage_name: str, prompt: str, model: str
+    ) -> tuple[str | None, str | None]:
+        """Call Claude to generate tasks markdown for one pipeline stage.
+
+        Returns (tasks_md, error_message).
+        """
+        system_prompt = BRAINSTORM_SYSTEM_PROMPT.replace("{repo_path}", str(repo_path))
+        repo_name = repo_path.name
+        repo_context = _get_repo_context(repo_path)
+        full_prompt = (
+            f"Target Repository: {repo_name}\n"
+            f"Repository Path: {repo_path}\n"
+            f"{repo_context}\n\n"
+            f"Pipeline Stage: {stage_name}\n\n"
+            f"USER REQUEST:\n{prompt}\n\n"
+            f"CRITICAL: All tasks MUST have `workdir: {repo_path}`. "
+            f'Generate tasks appropriate for the "{stage_name}" stage of the pipeline. '
+            "Start immediately with ##."
+        )
+        try:
+            result = subprocess.run(
+                ["claude", "--print", "--model", model, "--append-system-prompt", system_prompt],
+                input=full_prompt,
+                capture_output=True,
+                text=True,
+                timeout=300,
+            )
+        except FileNotFoundError:
+            return None, "claude CLI not found"
+        except subprocess.TimeoutExpired:
+            return None, "Claude CLI timed out"
+        if result.returncode != 0:
+            return None, f"Claude CLI error: {result.stderr.strip()[:200]}"
+        tasks_md = result.stdout.strip()
+        if not tasks_md:
+            return None, "Claude returned empty output"
+        return tasks_md, None
+
+    def _api_workspace_brainstorm_pipeline(self):
+        """POST /api/workspace/brainstorm/pipeline — generate pipeline + per-stage task files."""
+        body = self._read_body_json()
+        if body is None:
+            return
+        repo_path_str = body.get("repo_path")
+        prompt = body.get("prompt")
+        template_name = body.get("template_name")
+        stages_input = body.get("stages")  # Can be string (comma-sep) or array
+        model = body.get("model", "sonnet")
+
+        if not repo_path_str:
+            self._error(400, "Missing 'repo_path' field")
+            return
+        if not prompt or not isinstance(prompt, str):
+            self._error(400, "Missing or invalid 'prompt' field")
+            return
+        if not isinstance(model, str) or model not in ("opus", "sonnet", "haiku"):
+            model = "sonnet"
+
+        repo_path = _validate_workspace_path(repo_path_str)
+        if repo_path is None or not repo_path.is_dir():
+            self._error(400, "Invalid or non-existent repo_path")
+            return
+
+        if template_name and template_name not in VALID_PIPELINE_TEMPLATES:
+            self._error(
+                400,
+                f"Invalid template_name; must be one of: {', '.join(sorted(VALID_PIPELINE_TEMPLATES))}",
+            )
+            return
+
+        # Resolve template data and initial stage list
+        template_data: dict | None = None
+        stage_names: list[str] = []
+
+        if template_name:
+            tpl_file = ORCHESTRA_DIR / "templates" / "pipelines" / f"{template_name}.json"
+            try:
+                template_data = json.loads(tpl_file.read_text())
+            except Exception as e:
+                self._error(500, f"Failed to load template '{template_name}': {e}")
+                return
+            stage_names = [s["name"] for s in template_data.get("stages", [])]
+
+        # User-provided stages override template stage names
+        # Accept both comma-separated string and JSON array
+        if stages_input:
+            if isinstance(stages_input, list):
+                custom = [s.strip() for s in stages_input if isinstance(s, str) and s.strip()]
+            elif isinstance(stages_input, str):
+                custom = [s.strip() for s in stages_input.split(",") if s.strip()]
+            else:
+                custom = []
+            if custom:
+                stage_names = custom
+
+        if not stage_names:
+            self._error(400, "No stages defined; provide 'template_name' or 'stages'")
+            return
+
+        # Generate tasks for each stage via Claude IN PARALLEL
+        tasks_files: list[str] = []
+        stage_file_map: dict[str, str] = {}
+        stage_errors: dict[str, str] = {}
+        stage_results: dict[str, tuple] = {}  # stage_name -> (tasks_md, error)
+
+        def generate_stage_tasks(stage_name: str):
+            """Generate tasks for one stage. Returns (stage_name, tasks_md, error)."""
+            tasks_md, err = self._brainstorm_stage_tasks(repo_path, stage_name, prompt, model)
+            return (stage_name, tasks_md, err)
+
+        # Use ThreadPoolExecutor to parallelize Claude calls
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        with ThreadPoolExecutor(max_workers=min(len(stage_names), 5)) as executor:
+            futures = {executor.submit(generate_stage_tasks, s): s for s in stage_names}
+            for future in as_completed(futures):
+                stage_name, tasks_md, err = future.result()
+                if err:
+                    stage_errors[stage_name] = err
+                else:
+                    stage_results[stage_name] = (tasks_md, None)
+
+        # Report any errors
+        if stage_errors:
+            first_error = list(stage_errors.values())[0]
+            self._error(500, f"Stage generation failed: {first_error}")
+            return
+
+        # Save task files
+        for stage_name in stage_names:
+            tasks_md, _ = stage_results.get(stage_name, (None, None))
+            if tasks_md:
+                tasks_data = _convert_tasks_md_to_json(tasks_md)
+                slug = _stage_slug(stage_name)
+                filename = f"tasks-{slug}.json"
+                tasks_file = repo_path / filename
+                _save_tasks_file(tasks_file, tasks_data)
+                tasks_files.append(str(tasks_file))
+                stage_file_map[stage_name] = filename
+
+        # Build pipeline JSON
+        pipeline_name = template_name or "custom"
+        if template_data:
+            # Preserve template structure; replace per-stage task file references
+            new_stages = []
+            for stage in template_data["stages"]:
+                new_stage = dict(stage)
+                sname = stage["name"]
+                if sname in stage_file_map:
+                    orig_parallel = (
+                        stage["tasks"][0].get("max_parallel", 5)
+                        if stage.get("tasks")
+                        else 5
+                    )
+                    new_stage["tasks"] = [{"file": stage_file_map[sname], "max_parallel": orig_parallel}]
+                new_stages.append(new_stage)
+            pipeline: dict = {**template_data, "stages": new_stages}
+        else:
+            stages_list = []
+            for i, sname in enumerate(stage_names):
+                stages_list.append({
+                    "name": sname,
+                    "tasks": [{"file": stage_file_map[sname], "max_parallel": 5}],
+                    "pass_outputs_to_next": i < len(stage_names) - 1,
+                })
+            pipeline = {
+                "name": f"{pipeline_name.title()} Pipeline",
+                "stages": stages_list,
+                "aggregate": True,
+            }
+
+        pipeline_file = repo_path / f"pipeline-{pipeline_name}.json"
+        _save_tasks_file(pipeline_file, pipeline)
+
+        self._json({
+            "pipeline_path": str(pipeline_file),
+            "tasks_files": tasks_files,
+            "stages": [{"name": s, "file": stage_file_map[s]} for s in stage_names],
+        })
+
+    def _api_workspace_brainstorm_stage(self):
+        """POST /api/workspace/brainstorm/stage — generate tasks for one named pipeline stage."""
+        body = self._read_body_json()
+        if body is None:
+            return
+        repo_path_str = body.get("repo_path")
+        pipeline_path_str = body.get("pipeline_path")
+        stage_name = body.get("stage_name")
+        prompt = body.get("prompt")
+        model = body.get("model", "sonnet")
+
+        if not repo_path_str:
+            self._error(400, "Missing 'repo_path' field")
+            return
+        if not pipeline_path_str:
+            self._error(400, "Missing 'pipeline_path' field")
+            return
+        if not stage_name or not isinstance(stage_name, str):
+            self._error(400, "Missing or invalid 'stage_name' field")
+            return
+        if not prompt or not isinstance(prompt, str):
+            self._error(400, "Missing or invalid 'prompt' field")
+            return
+        if not isinstance(model, str) or model not in ("opus", "sonnet", "haiku"):
+            model = "sonnet"
+
+        repo_path = _validate_workspace_path(repo_path_str)
+        if repo_path is None or not repo_path.is_dir():
+            self._error(400, "Invalid or non-existent repo_path")
+            return
+
+        pipeline_path = _validate_workspace_path(pipeline_path_str)
+        if pipeline_path is None or not pipeline_path.is_file():
+            self._error(400, "Invalid or non-existent pipeline_path")
+            return
+
+        tasks_md, err = self._brainstorm_stage_tasks(repo_path, stage_name, prompt, model)
+        if err:
+            self._error(500, err)
+            return
+
+        tasks_data = _convert_tasks_md_to_json(tasks_md)
+        tasks_file = pipeline_path.parent / f"tasks-{_stage_slug(stage_name)}.json"
+        _save_tasks_file(tasks_file, tasks_data)
+
+        self._json({
+            "tasks_file": str(tasks_file),
+            "task_count": len(tasks_data.get("tasks", [])),
         })
 
     def _api_workspace_tasks_md_convert(self):
@@ -2071,6 +2733,94 @@ class OrchestraHandler(BaseHTTPRequestHandler):
             "run_id": run_id,
             "log_dir": str(log_dir),
             "task_count": task_count,
+        })
+
+    def _api_workspace_pipeline_run(self):
+        """POST /api/workspace/pipeline/run — run a pipeline.json file."""
+        body = self._read_body_json()
+        if body is None:
+            return
+        pipeline_path_str = body.get("pipeline_path")
+        if not pipeline_path_str:
+            self._error(400, "Missing 'pipeline_path' field")
+            return
+        pipeline_path = _validate_workspace_path(pipeline_path_str)
+        if pipeline_path is None:
+            self._error(400, "Invalid pipeline_path")
+            return
+        if not pipeline_path.is_file():
+            self._error(400, f"Pipeline file does not exist: {pipeline_path}")
+            return
+
+        # Validate pipeline JSON
+        try:
+            pipeline_data = json.loads(pipeline_path.read_text())
+            if "stages" not in pipeline_data:
+                self._error(400, "Pipeline JSON must have 'stages' array")
+                return
+        except json.JSONDecodeError as e:
+            self._error(400, f"Invalid JSON: {e}")
+            return
+
+        max_parallel = body.get("max_parallel", 3)
+        if not isinstance(max_parallel, int) or max_parallel < 1 or max_parallel > 50:
+            self._error(400, "max_parallel must be an integer between 1 and 50")
+            return
+
+        run_id = datetime.now().strftime("%Y-%m-%d_%H-%M-%S") + "-" + uuid.uuid4().hex[:6]
+        log_dir = self.logs_dir / run_id
+        log_dir.mkdir(parents=True, exist_ok=True)
+
+        # Use orchestra-pipeline binary
+        pipeline_bin = SCRIPT_DIR / "orchestra-pipeline"
+        if not pipeline_bin.exists():
+            self._error(500, "orchestra-pipeline binary not found")
+            return
+
+        # Pass LOGS_BASE so orchestra-pipeline writes state file to our logs directory
+        env = {**os.environ, "LOGS_BASE": str(self.logs_dir), "MAX_PARALLEL": str(max_parallel)}
+        try:
+            proc = subprocess.Popen(
+                [str(pipeline_bin), str(pipeline_path)],
+                cwd=str(pipeline_path.parent),
+                env=env,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                start_new_session=True,
+            )
+        except OSError as e:
+            self._error(500, f"Failed to spawn pipeline: {e}")
+            return
+
+        # Write meta.json for active-runs tracking
+        pipeline_name = pipeline_data.get("name", pipeline_path.stem)
+        stage_count = len(pipeline_data.get("stages", []))
+        meta = {
+            "repo_path": str(pipeline_path.parent),
+            "pid": proc.pid,
+            "source": "pipeline",
+            "task_name": f"Pipeline: {pipeline_name} ({stage_count} stages)",
+            "started_at": int(time.time()),
+            "pipeline_path": str(pipeline_path),
+        }
+        (log_dir / "meta.json").write_text(json.dumps(meta))
+
+        # Write metadata.json
+        started_at_iso = datetime.now(timezone.utc).isoformat()
+        metadata = {
+            "repo_path": str(pipeline_path.parent),
+            "pipeline_file": str(pipeline_path),
+            "pipeline_name": pipeline_name,
+            "started_at": started_at_iso,
+            "triggered_from": "workspace",
+        }
+        (log_dir / "metadata.json").write_text(json.dumps(metadata, indent=2))
+
+        self._json_status(202, {
+            "run_id": run_id,
+            "log_dir": str(log_dir),
+            "pipeline": pipeline_name,
+            "stage_count": stage_count,
         })
 
     def _api_workspace_active_runs(self):

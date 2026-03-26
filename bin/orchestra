@@ -135,6 +135,7 @@ write_state() {
         log_dir: $logdir,
         started_at: ($start | tonumber),
         ecc_enabled: $ecc,
+        total_elapsed_seconds: ([.tasks[] | .elapsed_seconds // 0] | add // 0),
         tasks: [.tasks[] | {
             id: .id,
             name: .name,
@@ -144,7 +145,10 @@ write_state() {
             skills: (.skills // null),
             hooks: (.hooks // null),
             cost_usd: (.cost_usd // null),
-            workdir: (.workdir // null)
+            workdir: (.workdir // null),
+            started_at: (.started_at // null),
+            finished_at: (.finished_at // null),
+            elapsed_seconds: (.elapsed_seconds // null)
         }]
     }' "$TASKS_FILE" > "$LOG_DIR/state.json" 2>/dev/null || true
 }
@@ -203,6 +207,23 @@ update_task_cost() {
     local tmp=$(mktemp)
     jq --arg id "$task_id" --argjson cost "$cost" \
         '(.tasks[] | select(.id == $id)).cost_usd = $cost' \
+        "$TASKS_FILE" > "$tmp" && mv "$tmp" "$TASKS_FILE"
+}
+
+update_task_started_at() {
+    local task_id="$1" started="$2"
+    local tmp=$(mktemp)
+    jq --arg id "$task_id" --argjson t "$started" \
+        '(.tasks[] | select(.id == $id)).started_at = $t' \
+        "$TASKS_FILE" > "$tmp" && mv "$tmp" "$TASKS_FILE"
+}
+
+update_task_finished_at() {
+    local task_id="$1" finished="$2" elapsed="$3"
+    local tmp=$(mktemp)
+    jq --arg id "$task_id" --argjson f "$finished" --argjson e "$elapsed" \
+        '(.tasks[] | select(.id == $id)).finished_at = $f |
+         (.tasks[] | select(.id == $id)).elapsed_seconds = $e' \
         "$TASKS_FILE" > "$tmp" && mv "$tmp" "$TASKS_FILE"
 }
 
@@ -292,6 +313,7 @@ launch_task() {
     TASK_NAMES[$id]="$name"
     TASK_STARTS[$id]=$(date +%s)
     update_task_status "$id" "running"
+    update_task_started_at "$id" "${TASK_STARTS[$id]}"
     write_state
 }
 
@@ -303,7 +325,8 @@ reap() {
             local id="${PIDS[$pid]}"
             local name="${TASK_NAMES[$id]}"
             local start="${TASK_STARTS[$id]}"
-            local elapsed=$(( $(date +%s) - start ))
+            local finished_at=$(date +%s)
+            local elapsed=$(( finished_at - start ))
             local mins=$(( elapsed / 60 ))
             local secs=$(( elapsed % 60 ))
 
@@ -317,6 +340,7 @@ reap() {
                 log "✗ ${RED}Failed${NC}: $name (exit=$exit_code, ${mins}m${secs}s)"
                 update_task_status "$id" "failed"
             fi
+            update_task_finished_at "$id" "$finished_at" "$elapsed"
 
             local cost
             cost=$(extract_task_cost "$LOG_DIR/${id}.stream.jsonl")
