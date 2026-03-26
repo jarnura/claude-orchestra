@@ -148,7 +148,10 @@ write_state() {
             workdir: (.workdir // null),
             started_at: (.started_at // null),
             finished_at: (.finished_at // null),
-            elapsed_seconds: (.elapsed_seconds // null)
+            elapsed_seconds: (.elapsed_seconds // null),
+            attempt: (.attempt // 1),
+            max_attempts: (.max_attempts // 1),
+            verify_status: (.verify_status // "skipped")
         }]
     }' "$TASKS_FILE" > "$LOG_DIR/state.json" 2>/dev/null || true
 }
@@ -190,9 +193,14 @@ if [[ "$MODE" == "interactive" ]]; then
 fi
 
 # Track PIDs
-declare -A PIDS        # pid -> task_id
-declare -A TASK_NAMES  # task_id -> name
-declare -A TASK_STARTS # task_id -> start time
+declare -A PIDS               # pid -> task_id
+declare -A TASK_NAMES         # task_id -> name
+declare -A TASK_STARTS        # task_id -> start time
+declare -A TASK_ATTEMPTS      # task_id -> current attempt (1-based)
+declare -A TASK_MAX_RETRIES   # task_id -> max retries allowed
+declare -A TASK_RETRY_DELAY   # task_id -> delay seconds between retries
+declare -A TASK_RETRY_BACKOFF # task_id -> "fixed" or "exponential"
+declare -A TASK_JSON_CACHE    # task_id -> original task json for re-launch
 
 update_task_status() {
     local task_id="$1" new_status="$2"
@@ -224,6 +232,16 @@ update_task_finished_at() {
     jq --arg id "$task_id" --argjson f "$finished" --argjson e "$elapsed" \
         '(.tasks[] | select(.id == $id)).finished_at = $f |
          (.tasks[] | select(.id == $id)).elapsed_seconds = $e' \
+        "$TASKS_FILE" > "$tmp" && mv "$tmp" "$TASKS_FILE" || rm -f "$tmp"
+}
+
+update_task_attempt() {
+    local task_id="$1" attempt_number="$2" max_attempts="$3"
+    local tmp=$(mktemp)
+    jq --arg id "$task_id" --argjson attempt "$attempt_number" \
+       --argjson max_attempts "$max_attempts" \
+        '(.tasks[] | select(.id == $id)).attempt = $attempt |
+         (.tasks[] | select(.id == $id)).max_attempts = $max_attempts' \
         "$TASKS_FILE" > "$tmp" && mv "$tmp" "$TASKS_FILE" || rm -f "$tmp"
 }
 
@@ -309,11 +327,21 @@ launch_task() {
     ) &
     local pid=$!
 
+    local max_retries=$(echo "$task_json" | jq -r '.max_retries // 0')
+    local retry_delay=$(echo "$task_json" | jq -r '.retry_delay_seconds // 5')
+    local retry_backoff=$(echo "$task_json" | jq -r '.retry_backoff // "fixed"')
+
     PIDS[$pid]="$id"
     TASK_NAMES[$id]="$name"
     TASK_STARTS[$id]=$(date +%s)
+    TASK_ATTEMPTS[$id]="${TASK_ATTEMPTS[$id]:-1}"
+    TASK_MAX_RETRIES[$id]="$max_retries"
+    TASK_RETRY_DELAY[$id]="$retry_delay"
+    TASK_RETRY_BACKOFF[$id]="$retry_backoff"
+    TASK_JSON_CACHE[$id]="$task_json"
     update_task_status "$id" "running"
     update_task_started_at "$id" "${TASK_STARTS[$id]}"
+    update_task_attempt "$id" "${TASK_ATTEMPTS[$id]}" "$((max_retries + 1))"
     write_state
 }
 
@@ -330,27 +358,76 @@ reap() {
             local mins=$(( elapsed / 60 ))
             local secs=$(( elapsed % 60 ))
 
-            wait "$pid" 2>/dev/null
-            local exit_code=$?
+            local exit_code=0
+            wait "$pid" 2>/dev/null || exit_code=$?
 
             if [[ $exit_code -eq 0 ]]; then
                 log "✓ ${GREEN}Completed${NC}: $name (${mins}m${secs}s)"
                 update_task_status "$id" "done"
+                update_task_finished_at "$id" "$finished_at" "$elapsed"
+
+                local cost
+                cost=$(extract_task_cost "$LOG_DIR/${id}.stream.jsonl")
+                if [[ -n "$cost" ]]; then
+                    update_task_cost "$id" "$cost"
+                    log "  cost: \$${cost}"
+                fi
+
+                unset "PIDS[$pid]"
+                write_state
             else
-                log "✗ ${RED}Failed${NC}: $name (exit=$exit_code, ${mins}m${secs}s)"
-                update_task_status "$id" "failed"
-            fi
-            update_task_finished_at "$id" "$finished_at" "$elapsed"
+                local attempt="${TASK_ATTEMPTS[$id]:-1}"
+                local max_retries="${TASK_MAX_RETRIES[$id]:-0}"
+                local retry_delay="${TASK_RETRY_DELAY[$id]:-5}"
+                local retry_backoff="${TASK_RETRY_BACKOFF[$id]:-fixed}"
 
-            local cost
-            cost=$(extract_task_cost "$LOG_DIR/${id}.stream.jsonl")
-            if [[ -n "$cost" ]]; then
-                update_task_cost "$id" "$cost"
-                log "  cost: \$${cost}"
-            fi
+                if [[ $attempt -le $max_retries ]]; then
+                    # Retries remain
+                    local next_attempt=$((attempt + 1))
+                    log "↻ Retrying: $name (attempt ${next_attempt}/$((max_retries + 1)), exit=$exit_code)"
+                    update_task_status "$id" "retrying"
+                    write_state
 
-            unset "PIDS[$pid]"
-            write_state
+                    # Calculate delay: exponential uses delay * 2^(attempt-1)
+                    local calculated_delay
+                    if [[ "$retry_backoff" == "exponential" ]]; then
+                        calculated_delay=$(( retry_delay * (1 << (attempt - 1)) ))
+                    else
+                        calculated_delay="$retry_delay"
+                    fi
+
+                    sleep "$calculated_delay"
+
+                    # Increment attempt counter
+                    TASK_ATTEMPTS[$id]=$((attempt + 1))
+
+                    # Free the slot
+                    unset "PIDS[$pid]"
+
+                    # Re-launch from cached task JSON
+                    launch_task "${TASK_JSON_CACHE[$id]}"
+
+                    # Restore attempt counter (launch_task defaults to 1 if unset)
+                    TASK_ATTEMPTS[$id]=$next_attempt
+
+                    continue
+                else
+                    # No retries remain — mark failed
+                    log "✗ ${RED}Failed${NC}: $name (exit=$exit_code, ${mins}m${secs}s)"
+                    update_task_status "$id" "failed"
+                    update_task_finished_at "$id" "$finished_at" "$elapsed"
+
+                    local cost
+                    cost=$(extract_task_cost "$LOG_DIR/${id}.stream.jsonl")
+                    if [[ -n "$cost" ]]; then
+                        update_task_cost "$id" "$cost"
+                        log "  cost: \$${cost}"
+                    fi
+
+                    unset "PIDS[$pid]"
+                    write_state
+                fi
+            fi
         fi
     done
 }
@@ -386,14 +463,15 @@ while true; do
         done < <(jq -c '.tasks[] | select(.status == "pending")' "$TASKS_FILE" | head -n "$slots")
     fi
 
-    remaining=$(jq '[.tasks[] | select(.status == "pending" or .status == "running")] | length' "$TASKS_FILE")
+    remaining=$(jq '[.tasks[] | select(.status == "pending" or .status == "running" or .status == "retrying")] | length' "$TASKS_FILE")
     if [[ $remaining -eq 0 && ${#PIDS[@]} -eq 0 ]]; then
         echo ""
         log "All tasks complete"
         echo ""
         done_count=$(jq '[.tasks[] | select(.status == "done")] | length' "$TASKS_FILE")
         fail_count=$(jq '[.tasks[] | select(.status == "failed")] | length' "$TASKS_FILE")
-        log "Results: ${GREEN}$done_count done${NC}, ${RED}$fail_count failed${NC}"
+        retry_count=$(jq '[.tasks[] | select((.attempt // 1) > 1)] | length' "$TASKS_FILE")
+        log "Results: ${GREEN}$done_count done${NC}, ${RED}$fail_count failed${NC}, ${YELLOW}$retry_count retried${NC}"
         log "Outputs in: $LOG_DIR/"
         write_state
         break
