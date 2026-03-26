@@ -9,5 +9,6 @@ if [[ ! -f "$TASKS_FILE" ]]; then
 fi
 
 tmp=$(mktemp)
+trap 'rm -f "$tmp"' EXIT
 jq '(.tasks[]).status = "pending"' "$TASKS_FILE" > "$tmp" && mv "$tmp" "$TASKS_FILE"
 echo "All tasks reset to pending."

@@ -118,7 +118,8 @@ else
     HASH=$(echo "$PROMPT" | sha256sum | head -c 8)
     ID="${SLUG}-${HASH}"
 fi
-TASKS_FILE="/tmp/orchestra-${ID}.json"
+TASKS_FILE=$(mktemp /tmp/orchestra-XXXXXX.json)
+trap 'rm -f "$TASKS_FILE"' EXIT
 
 # Create task JSON
 jq -n \

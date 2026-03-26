@@ -52,6 +52,7 @@ if [[ ! -f "$TASKS_FILE" ]]; then
 fi
 
 tmp=$(mktemp)
+trap 'rm -f "$tmp"' EXIT
 jq --arg id "$ID" \
    --arg name "$NAME" \
    --arg workdir "$WORKDIR" \

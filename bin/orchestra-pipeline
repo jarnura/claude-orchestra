@@ -61,6 +61,15 @@ fi
 
 log() { echo "[$(date '+%H:%M:%S')] $*"; }
 
+# Track temp files for cleanup on exit
+_PIPELINE_TMPFILES=()
+pipeline_cleanup() {
+    for f in "${_PIPELINE_TMPFILES[@]}"; do
+        rm -f "$f"
+    done
+}
+trap pipeline_cleanup EXIT
+
 # inject_prior_outputs(tasks_file, prior_log_dir)
 # Reads outputs from prior stage and appends them to task prompts
 inject_prior_outputs() {
@@ -88,7 +97,7 @@ inject_prior_outputs() {
     tmp=$(mktemp)
     jq --arg ctx "$context" '
         .tasks[] |= (.prompt = .prompt + "\n\n# Context from Prior Stage\n" + $ctx)
-    ' "$tasks_file" > "$tmp" && mv "$tmp" "$tasks_file"
+    ' "$tasks_file" > "$tmp" && mv "$tmp" "$tasks_file" || rm -f "$tmp"
 
     log "Injected prior stage outputs into $(jq '.tasks | length' "$tasks_file") tasks"
 }
@@ -197,7 +206,7 @@ update_pipeline_stage() {
     jq --argjson idx "$idx" --arg status "$status" --argjson run_ids "$run_ids_json" '
         .stages[$idx].status = $status |
         .stages[$idx].run_ids = $run_ids
-    ' "$PIPELINE_STATE_FILE" > "$tmp" && mv "$tmp" "$PIPELINE_STATE_FILE"
+    ' "$PIPELINE_STATE_FILE" > "$tmp" && mv "$tmp" "$PIPELINE_STATE_FILE" || rm -f "$tmp"
 }
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -237,6 +246,7 @@ for (( s=0; s<STAGE_COUNT; s++ )); do
             local_pass=$(jq -r ".stages[$((s-1))].pass_outputs_to_next // false" "$PIPELINE_FILE")
             if [[ "$local_pass" == "true" ]]; then
                 WORK_FILE=$(mktemp --suffix=.json)
+                _PIPELINE_TMPFILES+=("$WORK_FILE")
                 cp "$FILE" "$WORK_FILE"
                 inject_prior_outputs "$WORK_FILE" "$PRIOR_LOG_DIR"
             fi

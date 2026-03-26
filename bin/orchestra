@@ -199,7 +199,7 @@ update_task_status() {
     local tmp=$(mktemp)
     jq --arg id "$task_id" --arg s "$new_status" \
         '(.tasks[] | select(.id == $id)).status = $s' \
-        "$TASKS_FILE" > "$tmp" && mv "$tmp" "$TASKS_FILE"
+        "$TASKS_FILE" > "$tmp" && mv "$tmp" "$TASKS_FILE" || rm -f "$tmp"
 }
 
 update_task_cost() {
@@ -207,7 +207,7 @@ update_task_cost() {
     local tmp=$(mktemp)
     jq --arg id "$task_id" --argjson cost "$cost" \
         '(.tasks[] | select(.id == $id)).cost_usd = $cost' \
-        "$TASKS_FILE" > "$tmp" && mv "$tmp" "$TASKS_FILE"
+        "$TASKS_FILE" > "$tmp" && mv "$tmp" "$TASKS_FILE" || rm -f "$tmp"
 }
 
 update_task_started_at() {
@@ -215,7 +215,7 @@ update_task_started_at() {
     local tmp=$(mktemp)
     jq --arg id "$task_id" --argjson t "$started" \
         '(.tasks[] | select(.id == $id)).started_at = $t' \
-        "$TASKS_FILE" > "$tmp" && mv "$tmp" "$TASKS_FILE"
+        "$TASKS_FILE" > "$tmp" && mv "$tmp" "$TASKS_FILE" || rm -f "$tmp"
 }
 
 update_task_finished_at() {
@@ -224,7 +224,7 @@ update_task_finished_at() {
     jq --arg id "$task_id" --argjson f "$finished" --argjson e "$elapsed" \
         '(.tasks[] | select(.id == $id)).finished_at = $f |
          (.tasks[] | select(.id == $id)).elapsed_seconds = $e' \
-        "$TASKS_FILE" > "$tmp" && mv "$tmp" "$TASKS_FILE"
+        "$TASKS_FILE" > "$tmp" && mv "$tmp" "$TASKS_FILE" || rm -f "$tmp"
 }
 
 extract_task_cost() {
@@ -293,7 +293,7 @@ launch_task() {
     fi
 
     if [[ -n "$allowed_tools" ]]; then
-        cmd+=(--allowedTools $allowed_tools)
+        read -ra tools_arr <<< "$allowed_tools"; cmd+=(--allowedTools "${tools_arr[@]}")
     fi
     if [[ -n "$compound_prompt" ]]; then
         cmd+=(--append-system-prompt "$compound_prompt")
