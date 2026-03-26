@@ -151,7 +151,8 @@ write_state() {
             elapsed_seconds: (.elapsed_seconds // null),
             attempt: (.attempt // 1),
             max_attempts: (.max_attempts // 1),
-            verify_status: (.verify_status // "skipped")
+            verify_status: (.verify_status // "skipped"),
+            verify_output: (.verify_output // null)
         }]
     }' "$TASKS_FILE" > "$LOG_DIR/state.json" 2>/dev/null || true
 }
@@ -199,8 +200,12 @@ declare -A TASK_STARTS        # task_id -> start time
 declare -A TASK_ATTEMPTS      # task_id -> current attempt (1-based)
 declare -A TASK_MAX_RETRIES   # task_id -> max retries allowed
 declare -A TASK_RETRY_DELAY   # task_id -> delay seconds between retries
-declare -A TASK_RETRY_BACKOFF # task_id -> "fixed" or "exponential"
-declare -A TASK_JSON_CACHE    # task_id -> original task json for re-launch
+declare -A TASK_RETRY_BACKOFF   # task_id -> "fixed" or "exponential"
+declare -A TASK_JSON_CACHE      # task_id -> original task json for re-launch
+declare -A TASK_VERIFY_STRATEGY # task_id -> "none" or "command"
+declare -A TASK_VERIFY_CMD      # task_id -> shell command to run for verification
+declare -A TASK_VERIFY_TIMEOUT  # task_id -> timeout in seconds for verify command
+declare -A TASK_WORKDIRS        # task_id -> resolved workdir path
 
 update_task_status() {
     local task_id="$1" new_status="$2"
@@ -242,6 +247,22 @@ update_task_attempt() {
        --argjson max_attempts "$max_attempts" \
         '(.tasks[] | select(.id == $id)).attempt = $attempt |
          (.tasks[] | select(.id == $id)).max_attempts = $max_attempts' \
+        "$TASKS_FILE" > "$tmp" && mv "$tmp" "$TASKS_FILE" || rm -f "$tmp"
+}
+
+update_task_verify_status() {
+    local task_id="$1" vstatus="$2"
+    local tmp=$(mktemp)
+    jq --arg id "$task_id" --arg vs "$vstatus" \
+        '(.tasks[] | select(.id == $id)).verify_status = $vs' \
+        "$TASKS_FILE" > "$tmp" && mv "$tmp" "$TASKS_FILE" || rm -f "$tmp"
+}
+
+update_task_verify_output() {
+    local task_id="$1" voutput="$2"
+    local tmp=$(mktemp)
+    jq --arg id "$task_id" --arg vo "$voutput" \
+        '(.tasks[] | select(.id == $id)).verify_output = $vo' \
         "$TASKS_FILE" > "$tmp" && mv "$tmp" "$TASKS_FILE" || rm -f "$tmp"
 }
 
@@ -330,6 +351,9 @@ launch_task() {
     local max_retries=$(echo "$task_json" | jq -r '.max_retries // 0')
     local retry_delay=$(echo "$task_json" | jq -r '.retry_delay_seconds // 5')
     local retry_backoff=$(echo "$task_json" | jq -r '.retry_backoff // "fixed"')
+    local verify_strategy=$(echo "$task_json" | jq -r '.verify_strategy // "none"')
+    local verify_command=$(echo "$task_json" | jq -r '.verify_command // ""')
+    local verify_timeout=$(echo "$task_json" | jq -r '.verify_timeout // 60')
 
     PIDS[$pid]="$id"
     TASK_NAMES[$id]="$name"
@@ -339,6 +363,10 @@ launch_task() {
     TASK_RETRY_DELAY[$id]="$retry_delay"
     TASK_RETRY_BACKOFF[$id]="$retry_backoff"
     TASK_JSON_CACHE[$id]="$task_json"
+    TASK_VERIFY_STRATEGY[$id]="$verify_strategy"
+    TASK_VERIFY_CMD[$id]="$verify_command"
+    TASK_VERIFY_TIMEOUT[$id]="$verify_timeout"
+    TASK_WORKDIRS[$id]="$workdir"
     update_task_status "$id" "running"
     update_task_started_at "$id" "${TASK_STARTS[$id]}"
     update_task_attempt "$id" "${TASK_ATTEMPTS[$id]}" "$((max_retries + 1))"
@@ -362,19 +390,102 @@ reap() {
             wait "$pid" 2>/dev/null || exit_code=$?
 
             if [[ $exit_code -eq 0 ]]; then
-                log "✓ ${GREEN}Completed${NC}: $name (${mins}m${secs}s)"
-                update_task_status "$id" "done"
-                update_task_finished_at "$id" "$finished_at" "$elapsed"
+                local strategy="${TASK_VERIFY_STRATEGY[$id]:-none}"
 
-                local cost
-                cost=$(extract_task_cost "$LOG_DIR/${id}.stream.jsonl")
-                if [[ -n "$cost" ]]; then
-                    update_task_cost "$id" "$cost"
-                    log "  cost: \$${cost}"
+                if [[ "$strategy" == "command" && -n "${TASK_VERIFY_CMD[$id]:-}" ]]; then
+                    # Run post-task verification command
+                    update_task_status "$id" "verifying"
+                    write_state
+
+                    local workdir="${TASK_WORKDIRS[$id]:-.}"
+                    local verify_log="$LOG_DIR/${id}.verify.log"
+                    local verify_exit=0
+                    (cd "$workdir" && timeout "${TASK_VERIFY_TIMEOUT[$id]}" bash -c "${TASK_VERIFY_CMD[$id]}") > "$verify_log" 2>&1 || verify_exit=$?
+
+                    if [[ $verify_exit -eq 0 ]]; then
+                        update_task_verify_status "$id" "passed"
+                        log "✓ ${GREEN}Verified${NC}: $name"
+                        log "✓ ${GREEN}Completed${NC}: $name (${mins}m${secs}s)"
+                        update_task_status "$id" "done"
+                        update_task_finished_at "$id" "$finished_at" "$elapsed"
+
+                        local cost
+                        cost=$(extract_task_cost "$LOG_DIR/${id}.stream.jsonl")
+                        if [[ -n "$cost" ]]; then
+                            update_task_cost "$id" "$cost"
+                            log "  cost: \$${cost}"
+                        fi
+
+                        unset "PIDS[$pid]"
+                        write_state
+                    else
+                        local verify_output
+                        verify_output=$(tail -c 500 "$verify_log")
+                        update_task_verify_status "$id" "failed"
+                        update_task_verify_output "$id" "$verify_output"
+
+                        local attempt="${TASK_ATTEMPTS[$id]:-1}"
+                        local max_retries="${TASK_MAX_RETRIES[$id]:-0}"
+
+                        if [[ $attempt -le $max_retries ]]; then
+                            # Retry with verification feedback injected into prompt
+                            log "✗ ${RED}Verification failed${NC}: $name (retrying with feedback)"
+                            TASK_JSON_CACHE[$id]=$(echo "${TASK_JSON_CACHE[$id]}" | jq --arg fb "PREVIOUS ATTEMPT FAILED VERIFICATION:\n${verify_output}\n\nFix the issues above and try again.\n\nOriginal task:" '.prompt = ($fb + "\n" + .prompt)')
+
+                            update_task_status "$id" "retrying"
+                            write_state
+
+                            local retry_delay="${TASK_RETRY_DELAY[$id]:-5}"
+                            local retry_backoff="${TASK_RETRY_BACKOFF[$id]:-fixed}"
+                            local calculated_delay
+                            if [[ "$retry_backoff" == "exponential" ]]; then
+                                calculated_delay=$(( retry_delay * (1 << (attempt - 1)) ))
+                            else
+                                calculated_delay="$retry_delay"
+                            fi
+
+                            sleep "$calculated_delay"
+
+                            TASK_ATTEMPTS[$id]=$((attempt + 1))
+                            unset "PIDS[$pid]"
+                            launch_task "${TASK_JSON_CACHE[$id]}"
+                            TASK_ATTEMPTS[$id]=$((attempt + 1))
+
+                            continue
+                        else
+                            # No retries remain — mark failed
+                            log "✗ ${RED}Verification failed${NC}: $name (no retries left)"
+                            update_task_status "$id" "failed"
+                            update_task_finished_at "$id" "$finished_at" "$elapsed"
+
+                            local cost
+                            cost=$(extract_task_cost "$LOG_DIR/${id}.stream.jsonl")
+                            if [[ -n "$cost" ]]; then
+                                update_task_cost "$id" "$cost"
+                                log "  cost: \$${cost}"
+                            fi
+
+                            unset "PIDS[$pid]"
+                            write_state
+                        fi
+                    fi
+                else
+                    # No verification — mark done immediately
+                    update_task_verify_status "$id" "skipped"
+                    log "✓ ${GREEN}Completed${NC}: $name (${mins}m${secs}s)"
+                    update_task_status "$id" "done"
+                    update_task_finished_at "$id" "$finished_at" "$elapsed"
+
+                    local cost
+                    cost=$(extract_task_cost "$LOG_DIR/${id}.stream.jsonl")
+                    if [[ -n "$cost" ]]; then
+                        update_task_cost "$id" "$cost"
+                        log "  cost: \$${cost}"
+                    fi
+
+                    unset "PIDS[$pid]"
+                    write_state
                 fi
-
-                unset "PIDS[$pid]"
-                write_state
             else
                 local attempt="${TASK_ATTEMPTS[$id]:-1}"
                 local max_retries="${TASK_MAX_RETRIES[$id]:-0}"
@@ -463,7 +574,7 @@ while true; do
         done < <(jq -c '.tasks[] | select(.status == "pending")' "$TASKS_FILE" | head -n "$slots")
     fi
 
-    remaining=$(jq '[.tasks[] | select(.status == "pending" or .status == "running" or .status == "retrying")] | length' "$TASKS_FILE")
+    remaining=$(jq '[.tasks[] | select(.status == "pending" or .status == "running" or .status == "retrying" or .status == "verifying")] | length' "$TASKS_FILE")
     if [[ $remaining -eq 0 && ${#PIDS[@]} -eq 0 ]]; then
         echo ""
         log "All tasks complete"

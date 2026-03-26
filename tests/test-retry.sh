@@ -19,7 +19,7 @@ assert_eq() {
     fi
 }
 
-echo "=== Retry Loop Tests ==="
+echo "=== Retry and Verification Tests ==="
 
 TMPDIR=$(mktemp -d)
 trap "rm -rf $TMPDIR" EXIT
@@ -43,6 +43,22 @@ cat > /dev/null
 exit 1
 MOCK
 chmod +x "$TMPDIR/mock-claude"
+
+# Create mock claude CLI that always succeeds
+cat > "$TMPDIR/mock-claude-ok" << 'MOCK'
+#!/usr/bin/env bash
+if [[ "${1:-}" == "--help" ]]; then
+    echo "mock claude cli"
+    exit 0
+fi
+if [[ "${1:-}" == "auth" ]]; then
+    echo '{}'
+    exit 0
+fi
+cat > /dev/null
+exit 0
+MOCK
+chmod +x "$TMPDIR/mock-claude-ok"
 
 # -----------------------------------------------------------
 # Test 1: Task with max_retries=2 should end with attempt=3
@@ -154,6 +170,117 @@ assert_eq "Task status is failed" "failed" "$status"
 
 attempt=$(jq '.tasks[0].attempt' "$TMPDIR/tasks-default.json")
 assert_eq "Task attempt is 1" "1" "$attempt"
+
+# -----------------------------------------------------------
+# Test 4: verify: command with "true" -> done, verify_status "passed"
+# -----------------------------------------------------------
+echo ""
+echo "Test 4: Verification with 'true' command passes, task done"
+
+cat > "$TMPDIR/tasks-verify-pass.json" << 'JSON'
+{
+  "tasks": [{
+    "id": "verify-pass",
+    "name": "Verify Pass",
+    "prompt": "do something",
+    "workdir": ".",
+    "model": "sonnet",
+    "status": "pending",
+    "verify_strategy": "command",
+    "verify_command": "true",
+    "verify_timeout": 10
+  }]
+}
+JSON
+
+CLAUDE_CMD="$TMPDIR/mock-claude-ok" \
+MAX_PARALLEL=1 \
+POLL_INTERVAL=1 \
+LAUNCH_DELAY=0 \
+LOG_DIR="$TMPDIR/logs-verify-pass" \
+ECC_ENABLED=false \
+"$ORCHESTRA_DIR/bin/orchestra" "$TMPDIR/tasks-verify-pass.json" 2>&1 || true
+
+status=$(jq -r '.tasks[0].status' "$TMPDIR/tasks-verify-pass.json")
+assert_eq "Task status is done" "done" "$status"
+
+verify_status=$(jq -r '.tasks[0].verify_status' "$TMPDIR/tasks-verify-pass.json")
+assert_eq "Verify status is passed" "passed" "$verify_status"
+
+# -----------------------------------------------------------
+# Test 5: verify: command with "false", max_retries: 1 -> retry then fail
+# -----------------------------------------------------------
+echo ""
+echo "Test 5: Verification with 'false' command fails, retries once then fails"
+
+cat > "$TMPDIR/tasks-verify-fail.json" << 'JSON'
+{
+  "tasks": [{
+    "id": "verify-fail",
+    "name": "Verify Fail",
+    "prompt": "do something",
+    "workdir": ".",
+    "model": "sonnet",
+    "status": "pending",
+    "max_retries": 1,
+    "retry_delay_seconds": 0,
+    "retry_backoff": "fixed",
+    "verify_strategy": "command",
+    "verify_command": "false",
+    "verify_timeout": 10
+  }]
+}
+JSON
+
+CLAUDE_CMD="$TMPDIR/mock-claude-ok" \
+MAX_PARALLEL=1 \
+POLL_INTERVAL=1 \
+LAUNCH_DELAY=0 \
+LOG_DIR="$TMPDIR/logs-verify-fail" \
+ECC_ENABLED=false \
+"$ORCHESTRA_DIR/bin/orchestra" "$TMPDIR/tasks-verify-fail.json" 2>&1 || true
+
+status=$(jq -r '.tasks[0].status' "$TMPDIR/tasks-verify-fail.json")
+assert_eq "Task status is failed" "failed" "$status"
+
+verify_status=$(jq -r '.tasks[0].verify_status' "$TMPDIR/tasks-verify-fail.json")
+assert_eq "Verify status is failed" "failed" "$verify_status"
+
+attempt=$(jq '.tasks[0].attempt' "$TMPDIR/tasks-verify-fail.json")
+assert_eq "Task attempt is 2" "2" "$attempt"
+
+# -----------------------------------------------------------
+# Test 6: No verify fields -> verify_status "skipped" (backwards compat)
+# -----------------------------------------------------------
+echo ""
+echo "Test 6: No verify fields defaults to skipped"
+
+cat > "$TMPDIR/tasks-verify-skip.json" << 'JSON'
+{
+  "tasks": [{
+    "id": "verify-skip",
+    "name": "Verify Skip",
+    "prompt": "do something",
+    "workdir": ".",
+    "model": "sonnet",
+    "status": "pending"
+  }]
+}
+JSON
+
+CLAUDE_CMD="$TMPDIR/mock-claude-ok" \
+MAX_PARALLEL=1 \
+POLL_INTERVAL=1 \
+LAUNCH_DELAY=0 \
+LOG_DIR="$TMPDIR/logs-verify-skip" \
+ECC_ENABLED=false \
+"$ORCHESTRA_DIR/bin/orchestra" "$TMPDIR/tasks-verify-skip.json" 2>&1 || true
+
+status=$(jq -r '.tasks[0].status' "$TMPDIR/tasks-verify-skip.json")
+assert_eq "Task status is done" "done" "$status"
+
+verify_status=$(jq -r '.tasks[0].verify_status' "$TMPDIR/tasks-verify-skip.json")
+assert_eq "Verify status is skipped" "skipped" "$verify_status"
 
 echo ""
 echo "=== Results: $PASS passed, $FAIL failed ==="

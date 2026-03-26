@@ -15,6 +15,9 @@ set -euo pipefail
 #   - max_retries: 3
 #   - retry_delay_seconds: 5
 #   - retry_backoff: fixed|exponential
+#   - verify: none|command
+#   - verifyCommand: npm test && npm run build
+#   - verifyTimeout: 120
 #
 #   Prompt text (everything until next ## or EOF)
 
@@ -94,6 +97,14 @@ for section in sections:
         task['retry_delay_seconds'] = int(meta['retry_delay_seconds'])
     if 'retry_backoff' in meta:
         task['retry_backoff'] = meta['retry_backoff']
+
+    # Verification fields (optional)
+    if 'verify' in meta:
+        task['verify_strategy'] = meta['verify']
+    if 'verifyCommand' in meta:
+        task['verify_command'] = meta['verifyCommand']
+    if 'verifyTimeout' in meta:
+        task['verify_timeout'] = int(meta['verifyTimeout'])
 
     tasks.append(task)
 
