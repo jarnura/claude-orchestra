@@ -722,6 +722,20 @@ class LogWatcher(threading.Thread):
                         "task_id": tid,
                         "task_name": t.get("name", tid),
                     })
+                elif status == "retrying":
+                    self._broker.broadcast("task_retrying", {
+                        "run_id": run_id,
+                        "task_id": tid,
+                        "task_name": t.get("name", tid),
+                        "attempt": t.get("attempt", 1),
+                        "max_attempts": t.get("max_attempts", 1),
+                    })
+                elif status == "verifying":
+                    self._broker.broadcast("task_verifying", {
+                        "run_id": run_id,
+                        "task_id": tid,
+                        "task_name": t.get("name", tid),
+                    })
                 elif status in ("done", "failed"):
                     self._broker.broadcast("task_completed", {
                         "run_id": run_id,
@@ -729,6 +743,9 @@ class LogWatcher(threading.Thread):
                         "task_name": t.get("name", tid),
                         "status": status,
                         "cost_usd": t.get("cost_usd"),
+                        "attempt": t.get("attempt", 1),
+                        "max_attempts": t.get("max_attempts", 1),
+                        "verify_status": t.get("verify_status", "skipped"),
                     })
 
             self._run_states[run_id] = new_states
@@ -738,11 +755,15 @@ class LogWatcher(threading.Thread):
                 done = sum(1 for s in new_states.values() if s == "done")
                 failed = sum(1 for s in new_states.values() if s == "failed")
                 running = sum(1 for s in new_states.values() if s == "running")
+                retrying = sum(1 for s in new_states.values() if s == "retrying")
+                verifying = sum(1 for s in new_states.values() if s == "verifying")
                 self._broker.broadcast("run_progress", {
                     "run_id": run_id,
                     "tasks_done": done,
                     "tasks_failed": failed,
                     "tasks_running": running,
+                    "tasks_retrying": retrying,
+                    "tasks_verifying": verifying,
                     "tasks_total": len(new_states),
                 })
 
@@ -756,10 +777,14 @@ class LogWatcher(threading.Thread):
             if all_terminal and not was_terminal:
                 done = sum(1 for s in new_states.values() if s == "done")
                 failed = sum(1 for s in new_states.values() if s == "failed")
+                tasks_retried = sum(
+                    1 for t in tasks if t.get("attempt", 1) > 1
+                )
                 self._broker.broadcast("run_completed", {
                     "run_id": run_id,
                     "tasks_done": done,
                     "tasks_failed": failed,
+                    "tasks_retried": tasks_retried,
                 })
 
             # Watch stream files for running tasks

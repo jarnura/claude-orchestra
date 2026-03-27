@@ -92,6 +92,8 @@ main { max-width: 1200px; margin: 0 auto; padding: 24px; }
 .badge-running { background: #422006; color: #fcd34d; border: 1px solid #eab30840; animation: pulse 2s infinite; }
 .badge-pending { background: var(--surface3); color: var(--text-dim); border: 1px solid var(--border); }
 .badge-failed { background: #7f1d1d; color: #fca5a5; border: 1px solid #ef444440; }
+.badge-retrying { background: #422006; color: #fcd34d; border: 1px solid #eab30840; animation: pulse 2s infinite; }
+.badge-verifying { background: #164e63; color: #67e8f9; border: 1px solid #06b6d440; animation: pulse 2s infinite; }
 @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.6; } }
 
 .badge-opus { background: #3b0764; color: #c084fc; border: 1px solid #7c3aed40; }
@@ -746,9 +748,11 @@ function formatCost(n) {
   return '$' + n.toFixed(4);
 }
 
-function statusBadge(status) {
-  const cls = { done: 'badge-done', running: 'badge-running', pending: 'badge-pending', failed: 'badge-failed' };
-  return `<span class="badge ${cls[status] || 'badge-pending'}">${status || 'unknown'}</span>`;
+function statusBadge(status, attempt) {
+  const cls = { done: 'badge-done', running: 'badge-running', pending: 'badge-pending', failed: 'badge-failed', retrying: 'badge-retrying', verifying: 'badge-verifying' };
+  const label = status || 'unknown';
+  const attStr = (attempt && attempt > 1) ? ` <small>(×${attempt})</small>` : '';
+  return `<span class="badge ${cls[status] || 'badge-pending'}">${label}${attStr}</span>`;
 }
 
 function modelBadge(model) {
@@ -1045,7 +1049,7 @@ async function renderRunDetail(runId) {
       const skills = t.skills ? t.skills.split(',').map(s => `<span class="tag">${s.trim()}</span>`).join('') : '';
       html += `<div class="task-card">
         <div class="task-card-header">
-          ${statusBadge(t.status)}
+          ${statusBadge(t.status, t.attempt)}
           <span class="task-card-name">${t.name}</span>
         </div>
         <div class="task-card-meta">

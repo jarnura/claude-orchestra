@@ -229,7 +229,7 @@ def get_task_duration(
                 if started is not None and finished is not None:
                     return int(finished - started)
 
-    if status == "running":
+    if status in ("running", "retrying", "verifying"):
         for src in (st, task):
             if src and src.get("started_at") is not None:
                 return int(now - src["started_at"])
@@ -277,6 +277,8 @@ def status_badge(status: str) -> Text:
         "done": ("DONE", "bold green"),
         "running": ("RUN", "bold blue"),
         "failed": ("FAIL", "bold red"),
+        "retrying": ("RETRY", "bold yellow"),
+        "verifying": ("VRFY", "bold cyan"),
     }
     label, style = badges.get(status, ("WAIT", "dim"))
     return Text(label, style=style)
@@ -392,9 +394,12 @@ def build_display(
     log_dir = resolve_log_dir(state, tasks_file)
 
     # ── Aggregate metrics ──
-    counts = {"pending": 0, "running": 0, "done": 0, "failed": 0}
+    counts = {"pending": 0, "running": 0, "done": 0, "failed": 0,
+              "retrying": 0, "verifying": 0}
     total_cost = 0.0
     sum_task_time = 0
+    has_retries = False
+    has_verify = False
 
     for t in tasks:
         s = t.get("status", "pending")
@@ -407,6 +412,14 @@ def build_display(
         dur = get_task_duration(t, state, log_dir, now)
         if dur is not None and s in ("done", "failed"):
             sum_task_time += dur
+
+        st = _find_in_state(state, t.get("id", ""))
+        max_att = (st or t).get("max_attempts", 1)
+        vs = (st or t).get("verify_status", "skipped")
+        if max_att > 1:
+            has_retries = True
+        if vs != "skipped":
+            has_verify = True
 
     total = len(tasks)
     orch_start = state.get("started_at", start_time) if state else start_time
@@ -438,7 +451,8 @@ def build_display(
     hdr.append(f"Elapsed {fmt_mmss(wall_elapsed)}", style="dim")
 
     # All done indicator
-    if total > 0 and counts["done"] + counts["failed"] == total:
+    terminal = counts["done"] + counts["failed"]
+    if total > 0 and terminal == total:
         hdr.append("  │  ", style="dim")
         if counts["failed"] == 0:
             hdr.append("✓ ALL DONE", style="bold green")
@@ -477,6 +491,10 @@ def build_display(
     table.add_column(
         "Agents", width=14, no_wrap=True, overflow="ellipsis"
     )
+    if has_retries:
+        table.add_column("Att", width=5, justify="center", no_wrap=True)
+    if has_verify:
+        table.add_column("V", width=3, justify="center", no_wrap=True)
     table.add_column("Duration", width=9, justify="right", no_wrap=True)
     table.add_column("Cost", width=8, justify="right", no_wrap=True)
     table.add_column(
@@ -495,10 +513,10 @@ def build_display(
         task_status = t.get("status", "pending")
         agents, _ = get_task_ecc(t, state)
 
-        # Duration with live spinner for running tasks
+        # Duration with live spinner for running/retrying/verifying tasks
         dur = get_task_duration(t, state, log_dir, now)
         dur_str = fmt_mmss(dur)
-        if task_status == "running" and dur is not None:
+        if task_status in ("running", "retrying", "verifying") and dur is not None:
             dur_str = f"{spinner} {dur_str}"
 
         cost = get_task_cost(t, state)
@@ -515,22 +533,48 @@ def build_display(
             "running": "bold",
             "failed": "red",
             "pending": "dim",
+            "retrying": "yellow",
+            "verifying": "cyan",
         }.get(task_status, "dim")
 
-        table.add_row(
+        # Build row cells
+        row_cells = [
             status_badge(task_status),
             Text(name, style=name_style, overflow="ellipsis", no_wrap=True),
             Text(
                 model,
-                style="cyan" if task_status == "running" else "dim",
+                style="cyan" if task_status in ("running", "verifying") else "dim",
             ),
             Text(
                 agents or "—",
                 style="magenta" if agents else "dim",
             ),
+        ]
+
+        # Conditional Attempts column
+        if has_retries:
+            st_data = _find_in_state(state, tid) or t
+            att = st_data.get("attempt", 1)
+            max_att = st_data.get("max_attempts", 1)
+            att_str = f"{att}/{max_att}"
+            att_style = "bold yellow" if att > 1 else "dim"
+            row_cells.append(Text(att_str, style=att_style))
+
+        # Conditional Verify column
+        if has_verify:
+            st_data = _find_in_state(state, tid) or t
+            vs = st_data.get("verify_status", "skipped")
+            if vs == "passed":
+                row_cells.append(Text("✓", style="green"))
+            elif vs == "failed":
+                row_cells.append(Text("✗", style="red"))
+            else:
+                row_cells.append(Text("—", style="dim"))
+
+        row_cells.extend([
             Text(
                 dur_str,
-                style="bold yellow" if task_status == "running" else "",
+                style="bold yellow" if task_status in ("running", "retrying", "verifying") else "",
             ),
             Text(
                 cost_str,
@@ -542,24 +586,35 @@ def build_display(
                 overflow="ellipsis",
                 no_wrap=True,
             ),
-        )
+        ])
+
+        table.add_row(*row_cells)
 
     parts.append(table)
 
     # ── Footer Summary ──
     foot = Text()
     foot.append("  ")
+    foot.append(f"Done: ", style="dim")
     foot.append(
-        f"{counts['done']}/{total}",
+        f"{counts['done']}",
         style="bold green" if counts["done"] == total else "green",
     )
-    foot.append(" done", style="green")
+    foot.append(" | ", style="dim")
+    foot.append(f"Failed: ", style="dim")
+    foot.append(f"{counts['failed']}", style="bold red" if counts["failed"] else "dim")
+    if counts["retrying"]:
+        foot.append(" | ", style="dim")
+        foot.append(f"Retrying: ", style="dim")
+        foot.append(f"{counts['retrying']}", style="bold yellow")
+    if counts["verifying"]:
+        foot.append(" | ", style="dim")
+        foot.append(f"Verifying: ", style="dim")
+        foot.append(f"{counts['verifying']}", style="bold cyan")
     if counts["running"]:
         foot.append(f"   {counts['running']} running", style="bold blue")
     if counts["pending"]:
         foot.append(f"   {counts['pending']} pending", style="dim")
-    if counts["failed"]:
-        foot.append(f"   {counts['failed']} failed", style="bold red")
     foot.append("   │", style="dim")
     foot.append("   Cost: ", style="dim")
     foot.append(

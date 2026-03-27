@@ -55,6 +55,11 @@ tasks = state.get('tasks', [])
 ecc_enabled = state.get('ecc_enabled', False)
 started_at = state.get('started_at', 0)
 
+retried_tasks = [t for t in tasks if t.get('attempt', 1) > 1]
+verify_passed = [t for t in tasks if t.get('verify_status') == 'passed']
+verify_failed = [t for t in tasks if t.get('verify_status') == 'failed']
+verify_skipped = [t for t in tasks if t.get('verify_status', 'skipped') == 'skipped']
+
 if format_type == 'json':
     # JSON report
     report = {
@@ -65,6 +70,10 @@ if format_type == 'json':
             'total': len(tasks),
             'done': len([t for t in tasks if t['status'] == 'done']),
             'failed': len([t for t in tasks if t['status'] == 'failed']),
+            'retried': len(retried_tasks),
+            'verify_passed': len(verify_passed),
+            'verify_failed': len(verify_failed),
+            'verify_skipped': len(verify_skipped),
         },
         'tasks': []
     }
@@ -86,6 +95,10 @@ if format_type == 'json':
             'model': task.get('model', 'opus'),
             'agents': task.get('agents'),
             'skills': task.get('skills'),
+            'attempt': task.get('attempt', 1),
+            'max_attempts': task.get('max_attempts', 1),
+            'verify_status': task.get('verify_status', 'skipped'),
+            'verify_output': task.get('verify_output'),
             'output_size': output_size,
             'output_excerpt': output_excerpt,
         })
@@ -105,18 +118,26 @@ else:
         print(f'**Started**: {dt.strftime(\"%Y-%m-%d %H:%M:%S\")}')
     print(f'**ECC**: {\"enabled\" if ecc_enabled else \"standalone\"}')
     print(f'**Results**: {len(done)} completed, {len(failed)} failed, {len(tasks)} total')
+    if retried_tasks:
+        print(f'**Retried**: {len(retried_tasks)} tasks')
+    print(f'**Verification**: {len(verify_passed)} passed, {len(verify_failed)} failed, {len(verify_skipped)} skipped')
     print()
 
     # Summary table
     print('## Tasks')
     print()
-    print('| Status | Task | Model | Agents | Output |')
-    print('|--------|------|-------|--------|--------|')
+    print('| Status | Task | Model | Agents | Att | Verify | Output |')
+    print('|--------|------|-------|--------|-----|--------|--------|')
 
     for task in tasks:
         tid = task['id']
         status_icon = '\u2713' if task['status'] == 'done' else '\u2717' if task['status'] == 'failed' else '\u25cb'
         agents = task.get('agents', '') or '\u2014'
+        att = task.get('attempt', 1)
+        max_att = task.get('max_attempts', 1)
+        att_str = f'{att}/{max_att}'
+        vs = task.get('verify_status', 'skipped')
+        vs_icon = '\u2713' if vs == 'passed' else '\u2717' if vs == 'failed' else '\u2014'
         output_file = log_dir / f'{tid}.output.md'
         output_size = ''
         if output_file.exists():
@@ -128,7 +149,7 @@ else:
             else:
                 output_size = f'{sz / (1024 * 1024):.1f}M'
 
-        print(f'| {status_icon} {task[\"status\"]} | {task.get(\"name\", tid)} | {task.get(\"model\", \"opus\")} | {agents} | {output_size} |')
+        print(f'| {status_icon} {task[\"status\"]} | {task.get(\"name\", tid)} | {task.get(\"model\", \"opus\")} | {agents} | {att_str} | {vs_icon} {vs} | {output_size} |')
 
     print()
 
@@ -145,6 +166,21 @@ else:
             print(f'- **Agents**: {task[\"agents\"]}')
         if task.get('skills'):
             print(f'- **Skills**: {task[\"skills\"]}')
+        att = task.get('attempt', 1)
+        max_att = task.get('max_attempts', 1)
+        if max_att > 1:
+            print(f'- **Attempts**: {att}/{max_att}')
+        vs = task.get('verify_status', 'skipped')
+        if vs != 'skipped':
+            print(f'- **Verify**: {vs}')
+        vo = task.get('verify_output')
+        if vo:
+            truncated = vo[:500]
+            fence = chr(96) * 3
+            print(f'- **Verify Output**:')
+            print(f'  {fence}')
+            print(f'  {truncated}')
+            print(f'  {fence}')
 
         output_file = log_dir / f'{tid}.output.md'
         if output_file.exists():
