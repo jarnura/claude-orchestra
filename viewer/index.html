@@ -80,6 +80,8 @@ main { max-width: 1200px; margin: 0 auto; padding: 24px; }
 .status-bar .seg-running { background: var(--yellow); }
 .status-bar .seg-pending { background: var(--text-dim); }
 .status-bar .seg-failed { background: var(--red); }
+.status-bar .seg-retrying { background: #eab308; }
+.status-bar .seg-verifying { background: #06b6d4; }
 
 .status-counts { font-size: 0.8rem; color: var(--text-muted); margin-top: 4px; }
 .ecc-badge { display: inline-block; padding: 1px 6px; border-radius: 3px; font-size: 0.7rem; font-weight: 600; }
@@ -94,6 +96,9 @@ main { max-width: 1200px; margin: 0 auto; padding: 24px; }
 .badge-failed { background: #7f1d1d; color: #fca5a5; border: 1px solid #ef444440; }
 .badge-retrying { background: #422006; color: #fcd34d; border: 1px solid #eab30840; animation: pulse 2s infinite; }
 .badge-verifying { background: #164e63; color: #67e8f9; border: 1px solid #06b6d440; animation: pulse 2s infinite; }
+.badge-verify-passed { background: #14532d; color: #86efac; border: 1px solid #22c55e40; font-size: 0.65rem; }
+.badge-verify-failed { background: #7f1d1d; color: #fca5a5; border: 1px solid #ef444440; font-size: 0.65rem; }
+.badge-verify-skipped { background: var(--surface3); color: var(--text-dim); border: 1px solid var(--border); font-size: 0.65rem; }
 @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.6; } }
 
 .badge-opus { background: #3b0764; color: #c084fc; border: 1px solid #7c3aed40; }
@@ -504,8 +509,12 @@ const api = {
     const r = await fetch(`${API_BASE}/api/runs/${runId}/${taskId}/stream?summarize=1`);
     if (!r.ok) throw new Error(`Failed: ${r.status}`);
     return r.json();
-  }
-  ,
+  },
+  async getVerify(runId, taskId) {
+    const r = await fetch(`${API_BASE}/api/runs/${runId}/${taskId}/verify`);
+    if (!r.ok) throw new Error(`Failed: ${r.status}`);
+    return r.json();
+  },
   async getPipelines() {
     const r = await fetch(`${API_BASE}/api/pipelines`);
     if (!r.ok) throw new Error(`Failed: ${r.status}`);
@@ -755,6 +764,18 @@ function statusBadge(status, attempt) {
   return `<span class="badge ${cls[status] || 'badge-pending'}">${label}${attStr}</span>`;
 }
 
+function verifyBadge(verifyStatus) {
+  if (!verifyStatus || verifyStatus === 'skipped') return '';
+  const cls = { passed: 'badge-verify-passed', failed: 'badge-verify-failed' };
+  const icon = verifyStatus === 'passed' ? '✓' : '✗';
+  return `<span class="badge ${cls[verifyStatus] || 'badge-verify-skipped'}">${icon} ${verifyStatus}</span>`;
+}
+
+function attemptInfo(attempt, maxAttempts) {
+  if (!attempt || !maxAttempts || maxAttempts <= 1) return '';
+  return `<span style="font-size:0.7rem;color:var(--text-muted)">attempt ${attempt}/${maxAttempts}</span>`;
+}
+
 function modelBadge(model) {
   if (!model) return '';
   const m = model.toLowerCase();
@@ -963,10 +984,12 @@ async function renderSessionList() {
           <div class="status-bar">
             ${c.done ? `<div class="seg-done" style="width:${c.done/total*100}%"></div>` : ''}
             ${c.running ? `<div class="seg-running" style="width:${c.running/total*100}%"></div>` : ''}
+            ${c.retrying ? `<div class="seg-retrying" style="width:${c.retrying/total*100}%"></div>` : ''}
+            ${c.verifying ? `<div class="seg-verifying" style="width:${c.verifying/total*100}%"></div>` : ''}
             ${c.pending ? `<div class="seg-pending" style="width:${c.pending/total*100}%"></div>` : ''}
             ${c.failed ? `<div class="seg-failed" style="width:${c.failed/total*100}%"></div>` : ''}
           </div>
-          <div class="status-counts">${c.done} done${c.running ? `, ${c.running} running` : ''}${c.failed ? `, ${c.failed} failed` : ''}</div>
+          <div class="status-counts">${c.done} done${c.running ? `, ${c.running} running` : ''}${c.retrying ? `, ${c.retrying} retrying` : ''}${c.verifying ? `, ${c.verifying} verifying` : ''}${c.failed ? `, ${c.failed} failed` : ''}</div>
         </td>
         <td>${c.total}</td>
         <td><span class="ecc-badge ${run.ecc_enabled ? 'ecc-on' : 'ecc-off'}">${run.ecc_enabled ? 'ECC' : 'standalone'}</span></td>
@@ -1050,17 +1073,20 @@ async function renderRunDetail(runId) {
       html += `<div class="task-card">
         <div class="task-card-header">
           ${statusBadge(t.status, t.attempt)}
+          ${verifyBadge(t.verify_status)}
           <span class="task-card-name">${t.name}</span>
         </div>
         <div class="task-card-meta">
           ${modelBadge(t.model)}
+          ${attemptInfo(t.attempt, t.max_attempts)}
           ${agents}
           ${skills}
         </div>
-        <div class="task-card-size">output: ${formatBytes(t.output_bytes)} · stream: ${formatBytes(t.stream_bytes)}${t.cost_usd != null ? ` · cost: ${formatCost(t.cost_usd)}` : ''}</div>
+        <div class="task-card-size">output: ${formatBytes(t.output_bytes)} · stream: ${formatBytes(t.stream_bytes)}${t.cost_usd != null ? ` · cost: ${formatCost(t.cost_usd)}` : ''}${t.verify_output ? ` · verify: ${t.verify_output.substring(0, 80)}${t.verify_output.length > 80 ? '…' : ''}` : ''}</div>
         <div class="task-card-actions">
           ${t.has_output ? `<a class="btn btn-primary" href="#/run/${runId}/${t.id}/output">View Output</a>` : '<span class="btn" style="opacity:0.3">No Output</span>'}
           ${t.has_stream ? `<a class="btn" href="#/run/${runId}/${t.id}/timeline">Timeline</a>` : ''}
+          ${t.has_verify_output ? `<a class="btn" onclick="viewVerifyOutput('${runId}','${t.id}')" style="cursor:pointer">Verify</a>` : ''}
         </div>
       </div>`;
     }
@@ -1068,6 +1094,30 @@ async function renderRunDetail(runId) {
     app.innerHTML = html;
   } catch (e) {
     app.innerHTML = `<div class="error-banner">Error: ${e.message}</div>`;
+  }
+}
+
+async function viewVerifyOutput(runId, taskId) {
+  try {
+    const data = await api.getVerify(runId, taskId);
+    const content = data.verify_output || '(no verification output)';
+    const overlay = document.createElement('div');
+    overlay.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.7);z-index:1000;display:flex;align-items:center;justify-content:center';
+    overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
+    const panel = document.createElement('div');
+    panel.style.cssText = 'background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:24px;max-width:700px;width:90%;max-height:80vh;overflow-y:auto;font-family:var(--mono);font-size:0.85rem;white-space:pre-wrap;color:var(--text)';
+    const header = document.createElement('div');
+    header.style.cssText = 'display:flex;justify-content:space-between;align-items:center;margin-bottom:16px';
+    header.innerHTML = `<strong style="font-size:1rem">Verification Result</strong><button onclick="this.closest('div[style*=fixed]').remove()" style="background:none;border:none;color:var(--text-muted);cursor:pointer;font-size:1.2rem">&times;</button>`;
+    panel.appendChild(header);
+    const body = document.createElement('pre');
+    body.style.cssText = 'margin:0;white-space:pre-wrap;word-break:break-word';
+    body.textContent = content;
+    panel.appendChild(body);
+    overlay.appendChild(panel);
+    document.body.appendChild(overlay);
+  } catch (e) {
+    alert('Failed to load verification output: ' + e.message);
   }
 }
 

@@ -1197,6 +1197,8 @@ class OrchestraHandler(BaseHTTPRequestHandler):
         elif m := re.match(r"^/api/runs/([^/]+)/([^/]+)/stream$", path):
             summarize = "summarize" in qs
             self._api_task_stream(m.group(1), m.group(2), summarize)
+        elif m := re.match(r"^/api/runs/([^/]+)/([^/]+)/verify$", path):
+            self._api_task_verify(m.group(1), m.group(2))
         elif path == "/api/pipelines":
             self._api_pipelines()
         elif path == "/api/pipelines/templates":
@@ -1382,6 +1384,8 @@ class OrchestraHandler(BaseHTTPRequestHandler):
                 "running": 0,
                 "pending": 0,
                 "failed": 0,
+                "retrying": 0,
+                "verifying": 0,
             }
             for t in tasks:
                 st = t.get("status", "pending")
@@ -1484,6 +1488,8 @@ class OrchestraHandler(BaseHTTPRequestHandler):
                 cost = _extract_cost_from_stream(stream_f)
             if cost is not None:
                 total_cost = (total_cost or 0.0) + cost
+            verify_md = run_dir / f"{tid}.verify.md"
+            verify_log = run_dir / f"{tid}.verify.log"
             tasks.append(
                 {
                     **t,
@@ -1496,6 +1502,8 @@ class OrchestraHandler(BaseHTTPRequestHandler):
                     else 0,
                     "has_output": output_f.exists() and output_f.stat().st_size > 0,
                     "has_stream": stream_f.exists() and stream_f.stat().st_size > 0,
+                    "has_verify_output": verify_md.exists() and verify_md.stat().st_size > 0,
+                    "has_verify_log": verify_log.exists() and verify_log.stat().st_size > 0,
                 }
             )
         ts = state.get("started_at", 0)
@@ -1535,6 +1543,32 @@ class OrchestraHandler(BaseHTTPRequestHandler):
             self._json(summary)
         else:
             self._serve_file(stream_f, "application/x-ndjson")
+
+    def _api_task_verify(self, run_id, task_id):
+        """GET /api/runs/<run_id>/<task_id>/verify — return verify output and log."""
+        if not self._validate_ids(run_id, task_id):
+            return
+        run_dir = self.logs_dir / run_id
+        verify_md = run_dir / f"{task_id}.verify.md"
+        verify_log = run_dir / f"{task_id}.verify.log"
+        result = {
+            "task_id": task_id,
+            "has_verify_output": verify_md.exists() and verify_md.stat().st_size > 0,
+            "has_verify_log": verify_log.exists() and verify_log.stat().st_size > 0,
+            "verify_output": "",
+            "verify_log": "",
+        }
+        if verify_md.exists():
+            try:
+                result["verify_output"] = verify_md.read_text()[:5000]
+            except Exception:
+                pass
+        if verify_log.exists():
+            try:
+                result["verify_log"] = verify_log.read_text()[:5000]
+            except Exception:
+                pass
+        self._json(result)
 
     def _api_pipelines(self):
         pipelines = []
