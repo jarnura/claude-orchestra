@@ -96,34 +96,90 @@ def _cache_invalidate(prefix: str):
 
 ORCHESTRA_BIN = SCRIPT_DIR / "orchestra"
 
-BRAINSTORM_SYSTEM_PROMPT = """You are a task decomposition expert. Your ONLY job is to break down user requests into parallel tasks.
+BRAINSTORM_SYSTEM_PROMPT = """You are a task decomposition expert for claude-orchestra. Your ONLY job is to break down user requests into parallel tasks with optimal agent/skill/verification configuration.
 
 CRITICAL INSTRUCTIONS:
 - DO NOT implement anything
-- DO NOT write code  
+- DO NOT write code
 - DO NOT explain what you would do
 - ONLY output task definitions in markdown format
 
 Your output MUST start immediately with "## " (task heading). No introduction, no explanation.
 
-Format each task EXACTLY like this:
+## Task Format
 
+Every metadata line is optional EXCEPT workdir and model. Only include lines that add value.
+
+```
 ## Task Name
 - workdir: {repo_path}
-- model: sonnet
-- effort: medium
+- model: opus|sonnet|haiku
+- effort: high|medium|low
+- agents: comma-separated agent names
+- skills: comma-separated skill names
+- hooks: strict|standard|minimal
+- allowedTools: Read Grep Glob Edit Write Bash Agent
+- max_retries: 0-3
+- retry_delay_seconds: 5
+- retry_backoff: fixed|exponential
+- verify: none|command|claude
+- verifyCommand: shell command to validate output
+- verifyTimeout: 60
+- verifyPrompt: criteria for claude verification
 
-Task description here. Be specific about what files to modify and what to implement.
+Detailed task prompt here.
+```
 
-Rules:
+## Available Agents (inject via agents: field)
+- planner — implementation planning, task decomposition
+- architect — system design, architectural decisions
+- tdd-guide — test-driven development, write tests first
+- code-reviewer — code quality review
+- security-reviewer — security vulnerability analysis
+- build-error-resolver — fixing build/compile errors
+- e2e-runner — end-to-end testing
+- refactor-cleaner — dead code cleanup
+- doc-updater — documentation updates
+- test-generator — generate missing tests
+- python-reviewer, typescript-reviewer, rust-reviewer, go-reviewer, java-reviewer, kotlin-reviewer, cpp-reviewer — language-specific review
+- database-reviewer — PostgreSQL/SQL review
+- docker-reviewer — Dockerfile review
+- kubernetes-reviewer — K8s manifests
+- terraform-reviewer — IaC review
+- dependency-auditor — dependency security audit
+
+## Available Skills (inject via skills: field)
+tdd-workflow, verification-loop, backend-patterns, frontend-patterns, api-design, coding-standards, python-patterns, golang-patterns, rust-patterns, kotlin-patterns, springboot-patterns, django-patterns, laravel-patterns, e2e-testing, mcp-server-patterns, python-testing, golang-testing, rust-testing, kotlin-testing, cpp-testing
+
+## Model Selection
+- opus: architecture, complex reasoning, planning, critical refactoring
+- sonnet: implementation, standard coding, code review
+- haiku: simple checks, linting, formatting, verification reviewers
+
+## Verification Strategies
+- none: output is self-evident or reviewed manually (default)
+- command: validate via shell command (tests, build, lint). Add verifyCommand.
+- claude: semantic review via haiku against criteria. Add verifyPrompt.
+
+## When to use what
+- Add agents: when task matches agent domain (security audit → security-reviewer)
+- Add skills: when task needs framework reference (Spring Boot → springboot-patterns)
+- Add verify: command when tasks modify code that has tests/build
+- Add verify: claude when output quality needs semantic judgment (docs, architecture)
+- Add max_retries: 1-2 when verification is set (gives agent a chance to fix)
+- Use hooks: strict for production/security-critical, standard for normal dev, minimal for docs
+- Use effort: high for complex tasks, medium for standard, low for simple
+
+## Rules
 - Generate 2-6 independent tasks that can run in parallel
-- Use model: opus for complex architecture, sonnet for implementation, haiku for simple checks
-- Be specific in task descriptions - mention exact files when possible
-- Each task should be self-contained and independently executable
+- Be extremely specific in prompts — name exact files, functions, endpoints
+- Each task must be self-contained and independently executable
+- Do NOT over-configure — omit optional fields when defaults are fine
+- Match agents to task type, not arbitrarily
 
 Respond ONLY with the task list in markdown format. Start immediately with ##."""
 
-BRAINSTORM_PIPELINE_SYSTEM_PROMPT = """You are a pipeline architecture expert. Your ONLY job is to design a multi-stage sequential pipeline for user requests.
+BRAINSTORM_PIPELINE_SYSTEM_PROMPT = """You are a pipeline architecture expert for claude-orchestra. Your ONLY job is to design multi-stage sequential pipelines with optimal agent/skill/verification configuration.
 
 CRITICAL INSTRUCTIONS:
 - DO NOT implement anything
@@ -134,32 +190,79 @@ CRITICAL INSTRUCTIONS:
 Output a JSON object with this EXACT structure:
 {
   "name": "Descriptive Pipeline Name",
+  "halt_on_stage_failure": true,
   "stages": [
     {
       "name": "Stage Name",
       "pass_outputs_to_next": true,
+      "max_stage_retries": 0,
       "tasks": [
         {
           "id": "task-slug-lowercase-hyphenated",
           "name": "Task Name",
-          "prompt": "Detailed task description. Mention specific files when possible.",
+          "prompt": "Detailed task description.",
           "model": "sonnet",
-          "workdir": "{repo_path}"
+          "effort": "high",
+          "workdir": "{repo_path}",
+          "agents": "agent-name",
+          "skills": "skill-name",
+          "hooks": "standard",
+          "max_retries": 1,
+          "retry_delay_seconds": 5,
+          "retry_backoff": "fixed",
+          "verify_strategy": "command",
+          "verify_command": "npm test",
+          "verify_timeout": 120,
+          "verify_prompt": "criteria for claude verification"
         }
       ]
     }
-  ]
+  ],
+  "aggregate": true
 }
 
-Rules:
-- Generate 2-4 pipeline stages that must run sequentially
+## Available Agents (use in task "agents" field)
+planner, architect, tdd-guide, code-reviewer, security-reviewer, build-error-resolver, e2e-runner, refactor-cleaner, doc-updater, test-generator, python-reviewer, typescript-reviewer, rust-reviewer, go-reviewer, java-reviewer, kotlin-reviewer, cpp-reviewer, database-reviewer, docker-reviewer, kubernetes-reviewer, terraform-reviewer, dependency-auditor
+
+## Available Skills (use in task "skills" field)
+tdd-workflow, verification-loop, backend-patterns, frontend-patterns, api-design, coding-standards, python-patterns, golang-patterns, rust-patterns, kotlin-patterns, springboot-patterns, django-patterns, laravel-patterns, e2e-testing, mcp-server-patterns
+
+## Pipeline-level fields
+- halt_on_stage_failure: true (default) stops pipeline when a stage fails. Set false for independent audits.
+- aggregate: true generates a summary report at the end.
+
+## Stage-level fields
+- pass_outputs_to_next: true injects prior stage outputs as context into next stage tasks.
+- max_stage_retries: 0 (default). If > 0, failed stages reset failed tasks and re-run.
+
+## Task-level optional fields (omit when defaults are fine)
+- agents: inject domain expertise (match agent to task type)
+- skills: inject framework reference material
+- hooks: "strict" for production/security, "standard" for normal, "minimal" for docs
+- effort: "high" for complex, "medium" for standard, "low" for simple
+- max_retries: 0-3 — retries with failure feedback injection
+- retry_delay_seconds: delay between retries (default 5)
+- retry_backoff: "fixed" or "exponential"
+- verify_strategy: "none" (default), "command" (run shell command), "claude" (semantic review via haiku)
+- verify_command: shell command for verify_strategy "command"
+- verify_timeout: timeout in seconds for verify command (default 60)
+- verify_prompt: criteria text for verify_strategy "claude"
+
+## Model Selection
+- opus: planning stages, architecture, complex reasoning
+- sonnet: implementation, standard coding, reviews
+- haiku: simple checks, linting, verification
+
+## Rules
+- Generate 2-4 pipeline stages that run sequentially
 - Each stage can have 1-5 parallel tasks
-- Use model: opus for complex architecture/planning, sonnet for implementation, haiku for simple checks
-- Set pass_outputs_to_next: true for all stages except the last one
-- task id must be lowercase letters and hyphens only (no spaces, no underscores, no numbers at start)
-- Be specific in task prompts — mention exact files when possible
-- Each task must be self-contained and executable within its stage
+- First stage: planning/analysis (opus). Middle: implementation (sonnet). Last: verification (sonnet/haiku).
+- task id: lowercase letters and hyphens only
+- Be specific in prompts — name exact files, functions, endpoints
 - workdir must always be {repo_path}
+- Add verify_strategy "command" with test/build commands for implementation stages
+- Add max_retries: 1-2 for tasks with verification
+- Only include optional fields that add value — don't over-configure
 
 Respond ONLY with the raw JSON object. No markdown, no code blocks, no explanation."""
 
@@ -503,6 +606,22 @@ def _convert_tasks_md_to_json(tasks_md: str) -> dict:
         for field in ("allowedTools", "appendSystemPrompt", "agents", "skills", "hooks"):
             if field in meta:
                 task[field] = meta[field]
+        # Retry fields
+        if "max_retries" in meta:
+            task["max_retries"] = int(meta["max_retries"])
+        if "retry_delay_seconds" in meta:
+            task["retry_delay_seconds"] = int(meta["retry_delay_seconds"])
+        if "retry_backoff" in meta:
+            task["retry_backoff"] = meta["retry_backoff"]
+        # Verification fields
+        if "verify" in meta:
+            task["verify_strategy"] = meta["verify"]
+        if "verifyCommand" in meta:
+            task["verify_command"] = meta["verifyCommand"]
+        if "verifyTimeout" in meta:
+            task["verify_timeout"] = int(meta["verifyTimeout"])
+        if "verifyPrompt" in meta:
+            task["verify_prompt"] = meta["verifyPrompt"]
         tasks.append(task)
     return {"tasks": tasks}
 
@@ -2388,31 +2507,46 @@ CRITICAL: All task workdir fields MUST be "{repo_path}". Generate a realistic mu
             inline_tasks = stage_spec.get("tasks", [])
 
             normalised = []
+            # Task fields to preserve from brainstorm output
+            _TASK_OPTIONAL_FIELDS = [
+                "effort", "agents", "skills", "hooks", "allowedTools",
+                "appendSystemPrompt", "max_retries", "retry_delay_seconds",
+                "retry_backoff", "verify_strategy", "verify_command",
+                "verify_timeout", "verify_prompt",
+            ]
             for t in inline_tasks:
                 task_id = re.sub(r"[^a-z0-9-]", "-", str(t.get("id", stage_slug)).lower()).strip("-") or f"task-{i}"
-                normalised.append({
+                task_obj = {
                     "id": task_id,
                     "name": t.get("name", task_id),
                     "prompt": t.get("prompt", ""),
                     "model": t.get("model", "sonnet"),
                     "workdir": str(repo_path),
                     "status": "pending",
-                })
+                }
+                for field in _TASK_OPTIONAL_FIELDS:
+                    if field in t and t[field] is not None:
+                        task_obj[field] = t[field]
+                normalised.append(task_obj)
             total_tasks += len(normalised)
 
             tasks_file = pipeline_dir / f"tasks-{stage_slug}.json"
             tasks_file.write_text(json.dumps({"tasks": normalised}, indent=2))
 
-            pipeline_stages.append({
+            stage_entry = {
                 "name": stage_name,
                 "tasks": [{"file": str(tasks_file), "max_parallel": max_parallel}],
                 "pass_outputs_to_next": stage_spec.get(
                     "pass_outputs_to_next", i < len(pipeline_spec["stages"]) - 1
                 ),
-            })
+            }
+            if stage_spec.get("max_stage_retries"):
+                stage_entry["max_stage_retries"] = int(stage_spec["max_stage_retries"])
+            pipeline_stages.append(stage_entry)
 
         pipeline_json = {
             "name": pipeline_name,
+            "halt_on_stage_failure": pipeline_spec.get("halt_on_stage_failure", True),
             "stages": pipeline_stages,
             "aggregate": True,
         }
