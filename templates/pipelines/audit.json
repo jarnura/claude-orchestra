@@ -1,5 +1,6 @@
 {
   "name": "Comprehensive Audit Pipeline",
+  "halt_on_stage_failure": false,
   "stages": [
     {
       "name": "Audit (Parallel)",
