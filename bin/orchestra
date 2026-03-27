@@ -202,9 +202,10 @@ declare -A TASK_MAX_RETRIES   # task_id -> max retries allowed
 declare -A TASK_RETRY_DELAY   # task_id -> delay seconds between retries
 declare -A TASK_RETRY_BACKOFF   # task_id -> "fixed" or "exponential"
 declare -A TASK_JSON_CACHE      # task_id -> original task json for re-launch
-declare -A TASK_VERIFY_STRATEGY # task_id -> "none" or "command"
+declare -A TASK_VERIFY_STRATEGY # task_id -> "none", "command", or "claude"
 declare -A TASK_VERIFY_CMD      # task_id -> shell command to run for verification
 declare -A TASK_VERIFY_TIMEOUT  # task_id -> timeout in seconds for verify command
+declare -A TASK_VERIFY_PROMPT   # task_id -> criteria prompt for claude verification
 declare -A TASK_WORKDIRS        # task_id -> resolved workdir path
 
 update_task_status() {
@@ -354,6 +355,7 @@ launch_task() {
     local verify_strategy=$(echo "$task_json" | jq -r '.verify_strategy // "none"')
     local verify_command=$(echo "$task_json" | jq -r '.verify_command // ""')
     local verify_timeout=$(echo "$task_json" | jq -r '.verify_timeout // 60')
+    local verify_prompt=$(echo "$task_json" | jq -r '.verify_prompt // ""')
 
     PIDS[$pid]="$id"
     TASK_NAMES[$id]="$name"
@@ -366,6 +368,7 @@ launch_task() {
     TASK_VERIFY_STRATEGY[$id]="$verify_strategy"
     TASK_VERIFY_CMD[$id]="$verify_command"
     TASK_VERIFY_TIMEOUT[$id]="$verify_timeout"
+    TASK_VERIFY_PROMPT[$id]="$verify_prompt"
     TASK_WORKDIRS[$id]="$workdir"
     update_task_status "$id" "running"
     update_task_started_at "$id" "${TASK_STARTS[$id]}"
@@ -455,6 +458,116 @@ reap() {
                         else
                             # No retries remain — mark failed
                             log "✗ ${RED}Verification failed${NC}: $name (no retries left)"
+                            update_task_status "$id" "failed"
+                            update_task_finished_at "$id" "$finished_at" "$elapsed"
+
+                            local cost
+                            cost=$(extract_task_cost "$LOG_DIR/${id}.stream.jsonl")
+                            if [[ -n "$cost" ]]; then
+                                update_task_cost "$id" "$cost"
+                                log "  cost: \$${cost}"
+                            fi
+
+                            unset "PIDS[$pid]"
+                            write_state
+                        fi
+                    fi
+                elif [[ "$strategy" == "claude" ]]; then
+                    # Run Claude haiku verification session
+                    update_task_status "$id" "verifying"
+                    write_state
+
+                    local task_output
+                    task_output=$(head -c 10000 "$LOG_DIR/${id}.output.md" 2>/dev/null || echo "(no output)")
+                    local verify_criteria="${TASK_VERIFY_PROMPT[$id]:-Review the output for correctness}"
+
+                    local verify_full="You are a verification reviewer. Evaluate the following task output against the given criteria. Respond with EXACTLY one word on the first line: PASS or FAIL. Then on the next line, give a brief reason (1-2 sentences).
+
+CRITERIA: ${verify_criteria}
+
+TASK OUTPUT:
+${task_output}"
+
+                    local verify_md="$LOG_DIR/${id}.verify.md"
+                    local verify_log="$LOG_DIR/${id}.verify.log"
+                    local claude_verify_exit=0
+                    echo "$verify_full" | "$CLAUDE_CMD" --print --model haiku > "$verify_md" 2>"$verify_log" || claude_verify_exit=$?
+
+                    local first_line
+                    first_line=$(head -1 "$verify_md" 2>/dev/null || echo "")
+                    local claude_verdict="failed"
+                    if [[ "$first_line" == PASS* ]]; then
+                        claude_verdict="passed"
+                    fi
+
+                    local verify_response
+                    verify_response=$(head -c 500 "$verify_md" 2>/dev/null || echo "")
+
+                    # Add verification cost to task cost if available
+                    local verify_cost
+                    verify_cost=$(extract_task_cost "$verify_log")
+                    if [[ -n "$verify_cost" ]]; then
+                        local existing_cost
+                        existing_cost=$(jq -r --arg id "$id" '(.tasks[] | select(.id == $id)).cost_usd // 0' "$TASKS_FILE")
+                        if [[ -n "$existing_cost" && "$existing_cost" != "null" && "$existing_cost" != "0" ]]; then
+                            local total_cost
+                            total_cost=$(python3 -c "print(${existing_cost} + ${verify_cost})" 2>/dev/null || echo "$verify_cost")
+                            update_task_cost "$id" "$total_cost"
+                        else
+                            update_task_cost "$id" "$verify_cost"
+                        fi
+                    fi
+
+                    if [[ "$claude_verdict" == "passed" ]]; then
+                        update_task_verify_status "$id" "passed"
+                        update_task_verify_output "$id" "$verify_response"
+                        log "✓ ${GREEN}Verified (claude)${NC}: $name"
+                        log "✓ ${GREEN}Completed${NC}: $name (${mins}m${secs}s)"
+                        update_task_status "$id" "done"
+                        update_task_finished_at "$id" "$finished_at" "$elapsed"
+
+                        local cost
+                        cost=$(extract_task_cost "$LOG_DIR/${id}.stream.jsonl")
+                        if [[ -n "$cost" ]]; then
+                            update_task_cost "$id" "$cost"
+                            log "  cost: \$${cost}"
+                        fi
+
+                        unset "PIDS[$pid]"
+                        write_state
+                    else
+                        update_task_verify_status "$id" "failed"
+                        update_task_verify_output "$id" "$verify_response"
+
+                        local attempt="${TASK_ATTEMPTS[$id]:-1}"
+                        local max_retries="${TASK_MAX_RETRIES[$id]:-0}"
+
+                        if [[ $attempt -le $max_retries ]]; then
+                            log "✗ ${RED}Verification failed (claude)${NC}: $name (retrying with feedback)"
+                            TASK_JSON_CACHE[$id]=$(echo "${TASK_JSON_CACHE[$id]}" | jq --arg fb "PREVIOUS ATTEMPT FAILED VERIFICATION:\n${verify_response}\n\nFix the issues above and try again.\n\nOriginal task:" '.prompt = ($fb + "\n" + .prompt)')
+
+                            update_task_status "$id" "retrying"
+                            write_state
+
+                            local retry_delay="${TASK_RETRY_DELAY[$id]:-5}"
+                            local retry_backoff="${TASK_RETRY_BACKOFF[$id]:-fixed}"
+                            local calculated_delay
+                            if [[ "$retry_backoff" == "exponential" ]]; then
+                                calculated_delay=$(( retry_delay * (1 << (attempt - 1)) ))
+                            else
+                                calculated_delay="$retry_delay"
+                            fi
+
+                            sleep "$calculated_delay"
+
+                            TASK_ATTEMPTS[$id]=$((attempt + 1))
+                            unset "PIDS[$pid]"
+                            launch_task "${TASK_JSON_CACHE[$id]}"
+                            TASK_ATTEMPTS[$id]=$((attempt + 1))
+
+                            continue
+                        else
+                            log "✗ ${RED}Verification failed (claude)${NC}: $name (no retries left)"
                             update_task_status "$id" "failed"
                             update_task_finished_at "$id" "$finished_at" "$elapsed"
 

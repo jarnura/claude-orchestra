@@ -60,6 +60,73 @@ exit 0
 MOCK
 chmod +x "$TMPDIR/mock-claude-ok"
 
+# Create mock claude CLI that succeeds (stream-json) and responds "PASS" for haiku verify calls
+cat > "$TMPDIR/mock-claude-verify-pass" << 'MOCK'
+#!/usr/bin/env bash
+if [[ "${1:-}" == "--help" ]]; then
+    echo "mock claude cli"
+    exit 0
+fi
+if [[ "${1:-}" == "auth" ]]; then
+    echo '{}'
+    exit 0
+fi
+# Check if this is a haiku verification call (--print without --output-format)
+is_verify=false
+has_stream_json=false
+for arg in "$@"; do
+    if [[ "$arg" == "haiku" ]]; then
+        is_verify=true
+    fi
+    if [[ "$arg" == "stream-json" ]]; then
+        has_stream_json=true
+    fi
+done
+cat > /dev/null
+if $is_verify && ! $has_stream_json; then
+    # Verification call: plain text response
+    echo "PASS"
+    echo "Output meets all criteria."
+else
+    # Main task call: stream-json format
+    echo '{"type":"assistant","message":{"content":[{"type":"text","text":"task output here"}]}}'
+fi
+exit 0
+MOCK
+chmod +x "$TMPDIR/mock-claude-verify-pass"
+
+# Create mock claude that succeeds (stream-json) but returns FAIL for haiku verify calls
+cat > "$TMPDIR/mock-claude-verify-fail" << 'MOCK'
+#!/usr/bin/env bash
+if [[ "${1:-}" == "--help" ]]; then
+    echo "mock claude cli"
+    exit 0
+fi
+if [[ "${1:-}" == "auth" ]]; then
+    echo '{}'
+    exit 0
+fi
+is_verify=false
+has_stream_json=false
+for arg in "$@"; do
+    if [[ "$arg" == "haiku" ]]; then
+        is_verify=true
+    fi
+    if [[ "$arg" == "stream-json" ]]; then
+        has_stream_json=true
+    fi
+done
+cat > /dev/null
+if $is_verify && ! $has_stream_json; then
+    echo "FAIL"
+    echo "Output does not meet criteria."
+else
+    echo '{"type":"assistant","message":{"content":[{"type":"text","text":"task output here"}]}}'
+fi
+exit 0
+MOCK
+chmod +x "$TMPDIR/mock-claude-verify-fail"
+
 # -----------------------------------------------------------
 # Test 1: Task with max_retries=2 should end with attempt=3
 # -----------------------------------------------------------
@@ -281,6 +348,82 @@ assert_eq "Task status is done" "done" "$status"
 
 verify_status=$(jq -r '.tasks[0].verify_status' "$TMPDIR/tasks-verify-skip.json")
 assert_eq "Verify status is skipped" "skipped" "$verify_status"
+
+# -----------------------------------------------------------
+# Test 7: verify: claude with PASS response -> done, verify_status "passed"
+# -----------------------------------------------------------
+echo ""
+echo "Test 7: Claude verification with PASS response succeeds"
+
+cat > "$TMPDIR/tasks-claude-pass.json" << 'JSON'
+{
+  "tasks": [{
+    "id": "claude-pass",
+    "name": "Claude Verify Pass",
+    "prompt": "do something",
+    "workdir": ".",
+    "model": "sonnet",
+    "status": "pending",
+    "verify_strategy": "claude",
+    "verify_prompt": "Check that the output is correct"
+  }]
+}
+JSON
+
+CLAUDE_CMD="$TMPDIR/mock-claude-verify-pass" \
+MAX_PARALLEL=1 \
+POLL_INTERVAL=1 \
+LAUNCH_DELAY=0 \
+LOG_DIR="$TMPDIR/logs-claude-pass" \
+ECC_ENABLED=false \
+"$ORCHESTRA_DIR/bin/orchestra" "$TMPDIR/tasks-claude-pass.json" 2>&1 || true
+
+status=$(jq -r '.tasks[0].status' "$TMPDIR/tasks-claude-pass.json")
+assert_eq "Task status is done" "done" "$status"
+
+verify_status=$(jq -r '.tasks[0].verify_status' "$TMPDIR/tasks-claude-pass.json")
+assert_eq "Verify status is passed" "passed" "$verify_status"
+
+# -----------------------------------------------------------
+# Test 8: verify: claude with FAIL response + max_retries: 1 -> retry then fail
+# -----------------------------------------------------------
+echo ""
+echo "Test 8: Claude verification with FAIL response retries then fails"
+
+cat > "$TMPDIR/tasks-claude-fail.json" << 'JSON'
+{
+  "tasks": [{
+    "id": "claude-fail",
+    "name": "Claude Verify Fail",
+    "prompt": "do something",
+    "workdir": ".",
+    "model": "sonnet",
+    "status": "pending",
+    "max_retries": 1,
+    "retry_delay_seconds": 0,
+    "retry_backoff": "fixed",
+    "verify_strategy": "claude",
+    "verify_prompt": "Check that tests pass"
+  }]
+}
+JSON
+
+CLAUDE_CMD="$TMPDIR/mock-claude-verify-fail" \
+MAX_PARALLEL=1 \
+POLL_INTERVAL=1 \
+LAUNCH_DELAY=0 \
+LOG_DIR="$TMPDIR/logs-claude-fail" \
+ECC_ENABLED=false \
+"$ORCHESTRA_DIR/bin/orchestra" "$TMPDIR/tasks-claude-fail.json" 2>&1 || true
+
+status=$(jq -r '.tasks[0].status' "$TMPDIR/tasks-claude-fail.json")
+assert_eq "Task status is failed" "failed" "$status"
+
+verify_status=$(jq -r '.tasks[0].verify_status' "$TMPDIR/tasks-claude-fail.json")
+assert_eq "Verify status is failed" "failed" "$verify_status"
+
+attempt=$(jq '.tasks[0].attempt' "$TMPDIR/tasks-claude-fail.json")
+assert_eq "Task attempt is 2" "2" "$attempt"
 
 echo ""
 echo "=== Results: $PASS passed, $FAIL failed ==="
