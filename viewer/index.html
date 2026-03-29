@@ -702,6 +702,21 @@ pre:hover .copy-btn { opacity: 1; }
 .train-task-cost { color: var(--text-dim); font-size: 0.75rem; }
 .train-task-link { color: var(--accent); font-size: 0.75rem; white-space: nowrap; }
 
+/* Pipeline summary card */
+.pipeline-summary-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); overflow: hidden; animation: slide-down 0.25s ease-out; }
+.pipeline-summary-header { display: flex; align-items: center; gap: 10px; padding: 12px 16px; border-bottom: 1px solid var(--border); }
+.pipeline-summary-header h3 { font-family: var(--mono); font-size: 0.85rem; }
+.pipeline-summary-body { padding: 16px; font-size: 0.85rem; line-height: 1.6; }
+.pipeline-summary-body h2 { font-family: var(--display); font-size: 1rem; font-weight: 600; color: var(--accent); margin: 20px 0 8px 0; padding-bottom: 4px; border-bottom: 1px solid var(--border); }
+.pipeline-summary-body h2:first-child { margin-top: 0; }
+.pipeline-summary-body h3 { font-family: var(--mono); font-size: 0.85rem; font-weight: 600; color: var(--text); margin: 16px 0 6px 0; }
+.pipeline-summary-body ul { margin: 6px 0; padding-left: 20px; }
+.pipeline-summary-body li { margin-bottom: 4px; }
+.pipeline-summary-body strong { color: var(--text); }
+.pipeline-summary-body p { margin: 6px 0; }
+.pipeline-summary-body pre { background: var(--surface2); border: 1px solid var(--border); border-radius: var(--radius); padding: 10px; overflow-x: auto; font-size: 0.8rem; }
+#generate-summary-btn:disabled { opacity: 0.6; cursor: wait; }
+
 /* Legacy pipeline styles kept for list view */
 .pipeline-flow { display: flex; align-items: flex-start; gap: 0; overflow-x: auto; padding: 16px 0 24px; }
 .pipeline-stage-wrap { display: flex; align-items: flex-start; }
@@ -1079,6 +1094,22 @@ const api = {
   async getPipeline(id) {
     const r = await fetch(`${API_BASE}/api/pipeline/${id}`);
     if (!r.ok) throw new Error(`Failed: ${r.status}`);
+    return r.json();
+  },
+  async getPipelineSummary(id) {
+    const r = await fetch(`${API_BASE}/api/pipeline/${id}/summary`);
+    if (!r.ok) throw new Error(`Failed: ${r.status}`);
+    return r.json();
+  },
+  async generatePipelineSummary(id) {
+    const r = await fetch(`${API_BASE}/api/pipeline/${id}/summary`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: '{}'
+    });
+    if (!r.ok) {
+      const err = await r.json().catch(() => ({ error: `HTTP ${r.status}` }));
+      throw new Error(err.error || `Failed: ${r.status}`);
+    }
     return r.json();
   },
   // Config API
@@ -3231,6 +3262,9 @@ function renderPipelineTrainDOM(app, pipeline, pipelineId) {
   // Task breakdown panel placeholder
   html += '<div id="train-tasks-panel"></div>';
 
+  // Overall summary section
+  html += '<div id="pipeline-summary-section" class="pipeline-summary-section" style="margin-top:20px"></div>';
+
   // Pipeline config summary
   html += `<details class="collapsible" style="margin-top:16px">
     <summary>Pipeline Config</summary>
@@ -3257,6 +3291,106 @@ function renderPipelineTrainDOM(app, pipeline, pipelineId) {
   // Re-render task panel if a stage was selected
   if (selectedTrainStage !== null) {
     renderTrainTasksPanel(pipeline, selectedTrainStage);
+  }
+
+  // Load and render the summary section
+  loadPipelineSummary(pipelineId, pipeline);
+}
+
+async function loadPipelineSummary(pipelineId, pipeline) {
+  const section = document.getElementById('pipeline-summary-section');
+  if (!section) return;
+
+  // Check if pipeline is in a terminal state
+  const statuses = pipeline.stages.map(s => s.status);
+  const isTerminal = statuses.length > 0 && statuses.every(s => s === 'done' || s === 'failed' || s === 'skipped');
+
+  if (!isTerminal) {
+    section.innerHTML = '';
+    return;
+  }
+
+  // Check if summary exists
+  try {
+    const data = await api.getPipelineSummary(pipelineId);
+    if (data.summary) {
+      renderPipelineSummaryContent(section, data.summary);
+    } else {
+      renderPipelineSummaryButton(section, pipelineId);
+    }
+  } catch (e) {
+    renderPipelineSummaryButton(section, pipelineId);
+  }
+}
+
+function renderPipelineSummaryContent(section, summaryMd) {
+  section.innerHTML = `
+    <div class="pipeline-summary-card">
+      <div class="pipeline-summary-header">
+        <h3 style="margin:0;display:flex;align-items:center;gap:8px">
+          <span style="color:var(--accent)">Overall Summary</span>
+        </h3>
+      </div>
+      <div class="pipeline-summary-body markdown-body">${renderMarkdown(summaryMd)}</div>
+    </div>`;
+  highlightCodeBlocks(section);
+}
+
+function renderPipelineSummaryButton(section, pipelineId) {
+  section.innerHTML = `
+    <div class="pipeline-summary-card">
+      <div class="pipeline-summary-header">
+        <h3 style="margin:0;display:flex;align-items:center;gap:8px">
+          <span style="color:var(--accent)">Overall Summary</span>
+        </h3>
+      </div>
+      <div class="pipeline-summary-body" style="text-align:center;padding:24px">
+        <p style="color:var(--text-muted);margin:0 0 12px 0;font-size:0.85rem">No summary generated yet for this pipeline run.</p>
+        <button id="generate-summary-btn" class="btn btn-primary" onclick="generatePipelineSummary('${escapeHtml(pipelineId)}')">Generate summary</button>
+        <div id="summary-error" style="display:none;margin-top:12px;color:var(--red);font-size:0.8rem"></div>
+      </div>
+    </div>`;
+}
+
+async function generatePipelineSummary(pipelineId) {
+  const btn = document.getElementById('generate-summary-btn');
+  const errDiv = document.getElementById('summary-error');
+  if (!btn) return;
+
+  btn.disabled = true;
+  btn.textContent = 'Generating summary...';
+  if (errDiv) errDiv.style.display = 'none';
+
+  try {
+    const data = await api.generatePipelineSummary(pipelineId);
+    if (data.skipped) {
+      const section = document.getElementById('pipeline-summary-section');
+      if (section) {
+        section.innerHTML = `
+          <div class="pipeline-summary-card">
+            <div class="pipeline-summary-header">
+              <h3 style="margin:0;display:flex;align-items:center;gap:8px">
+                <span style="color:var(--accent)">Overall Summary</span>
+              </h3>
+            </div>
+            <div class="pipeline-summary-body" style="padding:16px;color:var(--text-muted);font-size:0.85rem">
+              No task output available — summary not generated.
+            </div>
+          </div>`;
+      }
+      return;
+    }
+    if (data.summary) {
+      const section = document.getElementById('pipeline-summary-section');
+      if (section) renderPipelineSummaryContent(section, data.summary);
+    }
+  } catch (e) {
+    btn.disabled = false;
+    btn.textContent = 'Generate summary';
+    if (errDiv) {
+      errDiv.textContent = `Error: ${e.message}. Click to retry.`;
+      errDiv.style.display = 'block';
+    }
   }
 }
 
@@ -3375,6 +3509,29 @@ function connectPipelineSSE(pipelineId, app) {
             renderPipelineTrainDOM(app, pipeline, pipelineId);
           }
         }).catch(() => {});
+      } catch (_) {}
+    });
+
+    pipelineEventSource.addEventListener('pipeline_summary_ready', function(event) {
+      try {
+        const data = JSON.parse(event.data);
+        if (data.pipeline_id !== pipelineId) return;
+        // Refresh summary section
+        const section = document.getElementById('pipeline-summary-section');
+        if (section) {
+          api.getPipelineSummary(pipelineId).then(result => {
+            if (result.summary) renderPipelineSummaryContent(section, result.summary);
+          }).catch(() => {});
+        }
+      } catch (_) {}
+    });
+
+    pipelineEventSource.addEventListener('pipeline_summary_error', function(event) {
+      try {
+        const data = JSON.parse(event.data);
+        if (data.pipeline_id !== pipelineId) return;
+        const section = document.getElementById('pipeline-summary-section');
+        if (section) renderPipelineSummaryButton(section, pipelineId);
       } catch (_) {}
     });
 
