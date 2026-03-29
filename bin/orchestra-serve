@@ -294,6 +294,62 @@ Stage naming rules:
 
 Respond ONLY with a JSON array like: ["Stage1", "Stage2", "Stage3"]"""
 
+PIPELINE_SUMMARY_SYSTEM_PROMPT = """You are a technical summarizer for an AI agent pipeline runner.
+Your job is to produce a clear, structured summary of a completed
+pipeline run based on task outputs, stage results, and metadata.
+
+Always respond in structured markdown. Never add preamble,
+sign-offs, or commentary outside the markdown structure.
+Use sentence case for all headings. Never use tables —
+use bullet points with bold labels instead."""
+
+PIPELINE_SUMMARY_USER_TEMPLATE = """Summarize the following pipeline run. Use the structure below exactly.
+<pipeline_run>
+  <metadata>
+    Pipeline name: {pipeline_name}
+    Run ID: {run_id}
+    Triggered at: {started_at}
+    Completed at: {completed_at}
+    Total duration: {duration}
+    Overall status: {overall_status}
+  </metadata>
+  <stages>
+{stages_xml}
+  </stages>
+</pipeline_run>
+---
+Produce the summary in this exact markdown structure:
+## Overall outcome
+One sentence. State whether the run succeeded, failed, or partially
+succeeded. Include pipeline name, run ID, and total duration.
+## Stage breakdown
+For each stage, write a sub-section:
+### Stage N — {{stage name}} · {{status emoji: ✓ / ✗ / —}}
+- **Status:** Succeeded / Failed / Skipped
+- **Tasks run:** N (M succeeded, K failed, J skipped)
+- **What happened:** 2–4 sentences synthesising what this stage
+  accomplished. Be specific — reference actual outputs, not generic
+  descriptions. If skipped, note the reason if inferable.
+- **Key outputs:** Bullet list of concrete artefacts, decisions,
+  data produced, or actions taken. Omit if none.
+## Errors and failures
+Only include this section if any task or stage failed.
+- One bullet per distinct failure.
+- Format: **[Stage / Task name]** — what went wrong and the
+  observable impact. Quote the exact error message if present
+  in the output (keep it under 20 words).
+## Key outputs and artefacts
+A flat bullet list of the most important outputs across the
+entire run — files created, decisions made, data produced,
+external calls completed. Omit minor or intermediate results.
+## Assessment
+2–3 sentences. Answer: did the pipeline achieve its goal?
+If it failed or partially failed, what is the actionable next step?
+Do not speculate beyond what the outputs show."""
+
+# Max tokens per task output before truncation (approximate via chars; 1 token ≈ 4 chars)
+_SUMMARY_OUTPUT_MAX_CHARS = 6000  # ~1500 tokens
+
 # ---------------------------------------------------------------------------
 # User model — file-based storage in <data_dir>/users.json
 # ---------------------------------------------------------------------------
@@ -1070,6 +1126,18 @@ class LogWatcher(threading.Thread):
                         })
 
                 self._pipeline_states[pid] = new_stages
+
+                # Auto-trigger summary when pipeline reaches terminal state
+                all_terminal = new_stages and all(
+                    s in ("done", "failed", "skipped") for s in new_stages.values()
+                )
+                was_terminal = old_stages and all(
+                    s in ("done", "failed", "skipped") for s in old_stages.values()
+                )
+                if all_terminal and not was_terminal:
+                    summary_file = _pipeline_summary_path(self._logs_dir, pid)
+                    if not summary_file.exists():
+                        _generate_summary_async(pid, self._logs_dir, self._broker)
             except Exception:
                 continue
 
@@ -1328,6 +1396,222 @@ def _auto_assign_tasks_to_stages(tasks: list[dict], stages: list[str]) -> dict[s
     return assignments
 
 
+# ---------------------------------------------------------------------------
+# Pipeline summary generation
+# ---------------------------------------------------------------------------
+
+def _truncate_output(text: str) -> str:
+    """Truncate task output to ~1500 tokens (≈6000 chars) and strip image references.
+
+    Image references are stripped because the summary model cannot process images.
+    """
+    # Strip markdown image syntax: ![alt text](image.png)
+    text = re.sub(r'!\[[^\]]*\]\([^)]+\)', '[image stripped]', text)
+    # Strip HTML img tags
+    text = re.sub(r'<img[^>]*>', '[image stripped]', text, flags=re.IGNORECASE)
+
+    if len(text) <= _SUMMARY_OUTPUT_MAX_CHARS:
+        return text
+    return "(truncated — first 1500 tokens)\n" + text[:_SUMMARY_OUTPUT_MAX_CHARS]
+
+
+def _pipeline_summary_path(logs_dir: Path, pipeline_id: str) -> Path:
+    """Return the file path for a pipeline's stored summary."""
+    return logs_dir / f"{pipeline_id}.summary.md"
+
+
+def _build_summary_prompt(pipeline_data: dict, logs_dir: Path) -> str | None:
+    """Build the user prompt for summary generation.
+
+    Returns None if every task was skipped (no output at all).
+    """
+    stages = pipeline_data.get("stages", [])
+    started_at = pipeline_data.get("started_at", 0)
+    try:
+        started_iso = datetime.fromtimestamp(int(started_at), tz=timezone.utc).isoformat()
+    except Exception:
+        started_iso = "unknown"
+
+    # Compute completed_at from latest task finished_at across all stages
+    latest_finished = 0
+    for stage in stages:
+        for run_id in stage.get("run_ids", []):
+            sf = logs_dir / run_id / "state.json"
+            if sf.exists():
+                try:
+                    state = json.loads(sf.read_text())
+                    for t in state.get("tasks", []):
+                        fin = t.get("finished_at") or 0
+                        if fin > latest_finished:
+                            latest_finished = fin
+                except Exception:
+                    pass
+    if latest_finished > 0:
+        try:
+            completed_iso = datetime.fromtimestamp(int(latest_finished), tz=timezone.utc).isoformat()
+        except Exception:
+            completed_iso = "unknown"
+        duration_s = int(latest_finished) - int(started_at) if started_at else 0
+        mins, secs = divmod(duration_s, 60)
+        duration_str = f"{mins}m {secs}s" if mins else f"{secs}s"
+    else:
+        completed_iso = "unknown"
+        duration_str = "unknown"
+
+    # Compute overall status
+    statuses = [s.get("status", "pending") for s in stages]
+    if all(s == "done" for s in statuses):
+        overall_status = "SUCCEEDED"
+    elif all(s in ("failed", "skipped") for s in statuses):
+        overall_status = "FAILED"
+    elif any(s == "failed" for s in statuses) or any(s == "skipped" for s in statuses):
+        overall_status = "PARTIAL"
+    else:
+        overall_status = "SUCCEEDED"
+
+    # Build stages XML
+    stages_xml_parts = []
+    has_any_output = False
+    for i, stage in enumerate(stages):
+        stage_status = stage.get("status", "pending")
+        status_map = {"done": "SUCCEEDED", "failed": "FAILED", "skipped": "SKIPPED", "pending": "SKIPPED"}
+        stage_status_label = status_map.get(stage_status, stage_status.upper())
+
+        tasks_xml_parts = []
+        for run_id in stage.get("run_ids", []):
+            sf = logs_dir / run_id / "state.json"
+            if not sf.exists():
+                continue
+            try:
+                state = json.loads(sf.read_text())
+            except Exception:
+                continue
+            for t in state.get("tasks", []):
+                t_status = t.get("status", "pending")
+                t_status_label = status_map.get(t_status, t_status.upper())
+                # Read task output
+                out_file = logs_dir / run_id / f"{t['id']}.output.md"
+                if out_file.exists():
+                    try:
+                        raw_output = out_file.read_text()
+                        if raw_output.strip():
+                            has_any_output = True
+                            output_text = _truncate_output(raw_output)
+                        else:
+                            output_text = "(no output — skipped)"
+                    except Exception:
+                        output_text = "(no output — skipped)"
+                else:
+                    output_text = "(no output — skipped)"
+                tasks_xml_parts.append(
+                    f'        <task name="{t.get("name", t["id"])}" status="{t_status_label}">\n'
+                    f'          <output>{output_text}</output>\n'
+                    f'        </task>'
+                )
+
+        # If stage has no run_ids, still include it as skipped
+        if not tasks_xml_parts:
+            tasks_xml_parts.append(
+                f'        <task name="(no tasks)" status="SKIPPED">\n'
+                f'          <output>(no output — skipped)</output>\n'
+                f'        </task>'
+            )
+
+        stages_xml_parts.append(
+            f'    <stage index="{i + 1}" name="{stage.get("name", f"Stage {i + 1}")}" status="{stage_status_label}">\n'
+            f'      <tasks>\n'
+            + "\n".join(tasks_xml_parts) + "\n"
+            f'      </tasks>\n'
+            f'    </stage>'
+        )
+
+    if not has_any_output:
+        return None
+
+    stages_xml = "\n".join(stages_xml_parts)
+
+    return PIPELINE_SUMMARY_USER_TEMPLATE.format(
+        pipeline_name=pipeline_data.get("name", "Unnamed"),
+        run_id=pipeline_data.get("id", "unknown"),
+        started_at=started_iso,
+        completed_at=completed_iso,
+        duration=duration_str,
+        overall_status=overall_status,
+        stages_xml=stages_xml,
+    )
+
+
+def _generate_summary_sync(pipeline_id: str, logs_dir: Path) -> tuple[str | None, str | None]:
+    """Generate a pipeline summary synchronously.
+
+    Returns (summary_markdown, error_message). One of the two will be None.
+    """
+    summary_file = _pipeline_summary_path(logs_dir, pipeline_id)
+
+    # Immutable: never regenerate
+    if summary_file.exists():
+        return summary_file.read_text(), None
+
+    pf = logs_dir / f"{pipeline_id}.json"
+    if not pf.exists():
+        return None, "Pipeline not found"
+
+    try:
+        pipeline_data = json.loads(pf.read_text())
+    except Exception as e:
+        return None, f"Failed to read pipeline state: {e}"
+
+    user_prompt = _build_summary_prompt(pipeline_data, logs_dir)
+    if user_prompt is None:
+        return None, "no_output"
+
+    try:
+        result = subprocess.run(
+            [CLAUDE_CMD, "--print", "--model", "claude-opus-4-5", "--append-system-prompt", PIPELINE_SUMMARY_SYSTEM_PROMPT],
+            input=user_prompt,
+            capture_output=True,
+            text=True,
+            timeout=300,
+        )
+    except FileNotFoundError:
+        return None, f"{CLAUDE_CMD} CLI not found"
+    except subprocess.TimeoutExpired:
+        return None, "Claude CLI timed out (300s)"
+
+    if result.returncode != 0:
+        return None, f"Claude CLI error: {result.stderr.strip()[:200]}"
+
+    summary = result.stdout.strip()
+    if not summary:
+        return None, "Claude returned empty output"
+
+    # Persist the summary
+    try:
+        summary_file.write_text(summary)
+    except OSError as e:
+        return None, f"Failed to write summary file: {e}"
+
+    return summary, None
+
+
+def _generate_summary_async(pipeline_id: str, logs_dir: Path, broker: SSEBroker | None):
+    """Generate summary in a background thread. Broadcasts SSE on completion."""
+    def _worker():
+        summary, error = _generate_summary_sync(pipeline_id, logs_dir)
+        if broker:
+            if summary:
+                broker.broadcast("pipeline_summary_ready", {
+                    "pipeline_id": pipeline_id,
+                })
+            elif error and error != "no_output":
+                broker.broadcast("pipeline_summary_error", {
+                    "pipeline_id": pipeline_id,
+                    "error": error,
+                })
+    t = threading.Thread(target=_worker, daemon=True)
+    t.start()
+
+
 class OrchestraHandler(BaseHTTPRequestHandler):
     logs_dir: Path = Path(".")
     broker: SSEBroker = None
@@ -1360,6 +1644,8 @@ class OrchestraHandler(BaseHTTPRequestHandler):
             self._api_pipeline_docs()
         elif m := re.match(r"^/api/pipeline/([^/]+)$", path):
             self._api_pipeline_detail(m.group(1))
+        elif m := re.match(r"^/api/pipeline/([^/]+)/summary$", path):
+            self._api_pipeline_summary_get(m.group(1))
         elif path == "/api/config/paths":
             self._api_config_paths()
         elif path == "/api/config/agents":
@@ -1434,6 +1720,8 @@ class OrchestraHandler(BaseHTTPRequestHandler):
             self._api_pipeline_template_create(m.group(1))
         elif path == "/api/pipeline-mapping/create":
             self._api_mapping_create()
+        elif m := re.match(r"^/api/pipeline/([^/]+)/summary$", path):
+            self._api_pipeline_summary_generate(m.group(1))
         elif m := re.match(r"^/api/pipeline-mapping/([^/]+)/execute$", path):
             self._api_mapping_execute(m.group(1))
         else:
@@ -1769,14 +2057,16 @@ class OrchestraHandler(BaseHTTPRequestHandler):
                     iso = datetime.fromtimestamp(int(ts), tz=timezone.utc).isoformat()
                 except Exception:
                     iso = None
+                pid = data["id"]
                 pipelines.append({
-                    "id": data["id"],
+                    "id": pid,
                     "name": data.get("name", "Unnamed"),
                     "started_at": ts,
                     "started_at_iso": iso,
                     "stage_count": len(stages),
                     "status": overall,
                     "stages": stages,
+                    "has_summary": _pipeline_summary_path(self.logs_dir, pid).exists(),
                 })
             except Exception:
                 continue
@@ -1872,6 +2162,52 @@ class OrchestraHandler(BaseHTTPRequestHandler):
             "started_at_iso": iso,
             "total_cost_usd": total_cost,
             "stages": stages,
+            "has_summary": _pipeline_summary_path(self.logs_dir, pipeline_id).exists(),
+        })
+
+    def _api_pipeline_summary_get(self, pipeline_id: str):
+        """GET /api/pipeline/<id>/summary — read stored summary."""
+        if not PIPELINE_ID_RE.match(pipeline_id):
+            self._error(400, "Invalid pipeline ID")
+            return
+        summary_file = _pipeline_summary_path(self.logs_dir, pipeline_id)
+        if not summary_file.exists():
+            self._json({"pipeline_id": pipeline_id, "summary": None})
+            return
+        self._json({
+            "pipeline_id": pipeline_id,
+            "summary": summary_file.read_text(),
+        })
+
+    def _api_pipeline_summary_generate(self, pipeline_id: str):
+        """POST /api/pipeline/<id>/summary — generate summary on demand."""
+        if not PIPELINE_ID_RE.match(pipeline_id):
+            self._error(400, "Invalid pipeline ID")
+            return
+        summary_file = _pipeline_summary_path(self.logs_dir, pipeline_id)
+        if summary_file.exists():
+            self._json({
+                "pipeline_id": pipeline_id,
+                "summary": summary_file.read_text(),
+                "cached": True,
+            })
+            return
+        summary, error = _generate_summary_sync(pipeline_id, self.logs_dir)
+        if error == "no_output":
+            self._json({
+                "pipeline_id": pipeline_id,
+                "summary": None,
+                "skipped": True,
+                "reason": "No task output available — summary not generated.",
+            })
+            return
+        if error:
+            self._error(500, error)
+            return
+        self._json({
+            "pipeline_id": pipeline_id,
+            "summary": summary,
+            "cached": False,
         })
 
     def _api_pipeline_templates(self):
@@ -3919,8 +4255,10 @@ CRITICAL: All task workdir fields MUST be "{repo_path}". Generate a realistic mu
             stage_tasks_path = self.logs_dir / stage_tasks_file
             stage_tasks_path.write_text(json.dumps(stage_tasks_data, indent=2))
 
-            source_tasks = source_stage.get("tasks", [])
-            max_par = source_tasks[0].get("max_parallel", 3) if source_tasks else 3
+            # Use a sensible default for mapper-generated pipelines (5 parallel tasks)
+            # Template max_parallel values are for template-specific task files,
+            # not for user-generated task files from the mapper
+            max_par = 5
             filtered_stages.append({
                 "name": source_stage.get("name", f"Stage {sidx}"),
                 "tasks": [{"file": str(stage_tasks_path), "max_parallel": max_par}],
