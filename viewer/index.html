@@ -3,275 +3,695 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>claude-orchestra viewer</title>
+<title>claude-orchestra</title>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11/styles/github-dark.min.css">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
 :root {
-  --bg: #0d0d0d;
-  --surface: #161616;
-  --surface2: #1e1e1e;
-  --surface3: #262626;
-  --border: #2a2a2a;
-  --border-light: #333;
-  --accent: #a855f7;
-  --accent2: #7c3aed;
-  --text: #e5e5e5;
-  --text-muted: #737373;
-  --text-dim: #525252;
-  --green: #22c55e;
-  --yellow: #eab308;
-  --red: #ef4444;
-  --blue: #3b82f6;
-  --orange: #f97316;
+  --bg: #07070a;
+  --surface: #0e0e14;
+  --surface2: #14141e;
+  --surface3: #1a1a28;
+  --border: #1f1f33;
+  --border-light: #2a2a44;
+  --accent: #c4a1ff;
+  --accent2: #8b5cf6;
+  --accent-glow: #a78bfa;
+  --accent-dim: #6d28d9;
+  --cyan: #22d3ee;
+  --cyan-dim: #0e7490;
+  --text: #e8e6f0;
+  --text-muted: #7c7a8e;
+  --text-dim: #4a4860;
+  --green: #34d399;
+  --green-dim: #065f46;
+  --yellow: #fbbf24;
+  --yellow-dim: #78350f;
+  --red: #f87171;
+  --red-dim: #7f1d1d;
+  --blue: #60a5fa;
+  --orange: #fb923c;
   --mono: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', 'SF Mono', monospace;
-  --sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
-  --radius: 6px;
+  --sans: 'Space Grotesk', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  --display: 'Space Grotesk', var(--sans);
+  --radius: 8px;
+  --radius-lg: 16px;
+  --glow-sm: 0 0 8px rgba(196, 161, 255, 0.15);
+  --glow-md: 0 0 20px rgba(196, 161, 255, 0.12), 0 0 40px rgba(139, 92, 246, 0.06);
+  --glow-lg: 0 0 30px rgba(196, 161, 255, 0.2), 0 0 60px rgba(139, 92, 246, 0.1);
+  --glow-cyan: 0 0 20px rgba(34, 211, 238, 0.15);
+  /* Stagger timing */
+  --stagger-base: 60ms;
 }
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-html { font-size: 14px; }
-body { background: var(--bg); color: var(--text); font-family: var(--sans); line-height: 1.6; min-height: 100vh; }
-a { color: var(--accent); text-decoration: none; }
-a:hover { text-decoration: underline; }
+html { font-size: 14px; scroll-behavior: smooth; }
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--sans);
+  line-height: 1.6;
+  min-height: 100vh;
+  /* Subtle scanline overlay */
+  background-image:
+    repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(255,255,255,0.008) 2px, rgba(255,255,255,0.008) 4px),
+    radial-gradient(ellipse at 50% 0%, rgba(139,92,246,0.07) 0%, transparent 60%);
+  background-attachment: fixed;
+}
+a { color: var(--accent); text-decoration: none; transition: color 0.2s; }
+a:hover { color: var(--cyan); text-decoration: none; }
 
-/* Header */
-header { background: var(--surface); border-bottom: 1px solid var(--border); padding: 12px 24px; display: flex; align-items: center; gap: 16px; position: sticky; top: 0; z-index: 100; }
-.brand { font-family: var(--mono); font-weight: 700; font-size: 1rem; color: var(--accent); white-space: nowrap; }
-.brand::before { content: '▸ '; color: var(--text-muted); }
-#breadcrumb { font-family: var(--mono); font-size: 0.85rem; color: var(--text-muted); display: flex; gap: 4px; align-items: center; overflow: hidden; }
+/* ── Stagger Animation System ── */
+@keyframes stagger-in {
+  from { opacity: 0; transform: translateY(16px) skewX(-0.5deg); filter: blur(3px); }
+  to { opacity: 1; transform: translateY(0) skewX(0deg); filter: blur(0); }
+}
+@keyframes stagger-in-left {
+  from { opacity: 0; transform: translateX(-24px) skewY(-0.5deg); }
+  to { opacity: 1; transform: translateX(0) skewY(0deg); }
+}
+@keyframes glow-pulse {
+  0%, 100% { box-shadow: var(--glow-sm); }
+  50% { box-shadow: var(--glow-md); }
+}
+@keyframes scanline-sweep {
+  0% { background-position: 0 -100%; }
+  100% { background-position: 0 200%; }
+}
+@keyframes flicker-in {
+  0% { opacity: 0; }
+  10% { opacity: 0.8; }
+  12% { opacity: 0.2; }
+  20% { opacity: 1; }
+  22% { opacity: 0.7; }
+  30% { opacity: 1; }
+}
+@keyframes text-glitch {
+  0%, 100% { text-shadow: none; }
+  20% { text-shadow: -2px 0 var(--cyan), 2px 0 var(--accent); }
+  40% { text-shadow: 2px 0 var(--red), -2px 0 var(--blue); }
+  60% { text-shadow: -1px 0 var(--accent), 1px 0 var(--cyan); }
+}
+.stagger-item {
+  opacity: 0;
+  animation: stagger-in 0.5s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+/* Generate stagger delays */
+.stagger-item:nth-child(1) { animation-delay: calc(var(--stagger-base) * 1); }
+.stagger-item:nth-child(2) { animation-delay: calc(var(--stagger-base) * 2); }
+.stagger-item:nth-child(3) { animation-delay: calc(var(--stagger-base) * 3); }
+.stagger-item:nth-child(4) { animation-delay: calc(var(--stagger-base) * 4); }
+.stagger-item:nth-child(5) { animation-delay: calc(var(--stagger-base) * 5); }
+.stagger-item:nth-child(6) { animation-delay: calc(var(--stagger-base) * 6); }
+.stagger-item:nth-child(7) { animation-delay: calc(var(--stagger-base) * 7); }
+.stagger-item:nth-child(8) { animation-delay: calc(var(--stagger-base) * 8); }
+.stagger-item:nth-child(9) { animation-delay: calc(var(--stagger-base) * 9); }
+.stagger-item:nth-child(10) { animation-delay: calc(var(--stagger-base) * 10); }
+.stagger-item:nth-child(n+11) { animation-delay: calc(var(--stagger-base) * 11); }
+
+/* ── Header — The Bold Typographic Moment ── */
+header {
+  background: linear-gradient(180deg, var(--surface) 0%, var(--bg) 100%);
+  border-bottom: 1px solid var(--border);
+  padding: 0 32px;
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  min-height: 56px;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+header::after {
+  content: '';
+  position: absolute;
+  bottom: -1px;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent 0%, var(--accent-dim) 30%, var(--accent) 50%, var(--accent-dim) 70%, transparent 100%);
+  opacity: 0.5;
+}
+.brand {
+  font-family: var(--display);
+  font-weight: 700;
+  font-size: 1.15rem;
+  letter-spacing: -0.02em;
+  color: var(--accent);
+  white-space: nowrap;
+  position: relative;
+  animation: flicker-in 0.8s ease-out;
+}
+.brand::before {
+  content: '//';
+  color: var(--text-dim);
+  margin-right: 6px;
+  font-weight: 400;
+}
+.brand:hover {
+  animation: text-glitch 0.3s ease-in-out;
+}
+.header-actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.github-link {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 6px;
+  color: var(--text-muted);
+  transition: all 0.15s;
+}
+.github-link:hover {
+  color: var(--text);
+  background: var(--surface2);
+}
+.github-link svg {
+  width: 20px;
+  height: 20px;
+}
+#breadcrumb { font-family: var(--mono); font-size: 0.8rem; color: var(--text-muted); display: flex; gap: 4px; align-items: center; overflow: hidden; }
 #breadcrumb a { color: var(--text-muted); }
-#breadcrumb a:hover { color: var(--accent); }
-#breadcrumb .sep { color: var(--text-dim); margin: 0 2px; }
-#breadcrumb .current { color: var(--text); }
+#breadcrumb a:hover { color: var(--cyan); }
+#breadcrumb .sep { color: var(--text-dim); margin: 0 4px; opacity: 0.4; }
+#breadcrumb .current { color: var(--text); font-weight: 500; }
 
-/* Tab bar */
-.tab-bar { background: var(--surface); border-bottom: 1px solid var(--border); display: flex; gap: 0; padding: 0 24px; position: sticky; top: 41px; z-index: 99; }
-.tab-bar a { display: inline-flex; align-items: center; gap: 6px; padding: 10px 18px; font-family: var(--mono); font-size: 0.8rem; color: var(--text-muted); text-decoration: none; border-bottom: 2px solid transparent; transition: color 0.15s, border-color 0.15s; }
-.tab-bar a:hover { color: var(--text); text-decoration: none; }
-.tab-bar a.active { color: var(--accent); border-bottom-color: var(--accent); }
+/* ── Tab bar — Diagonal accent ── */
+.tab-bar {
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  gap: 0;
+  padding: 0 32px;
+  position: sticky;
+  top: 56px;
+  z-index: 99;
+}
+.tab-bar a {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 12px 20px;
+  font-family: var(--mono);
+  font-size: 0.78rem;
+  font-weight: 500;
+  color: var(--text-dim);
+  text-decoration: none;
+  border-bottom: 2px solid transparent;
+  transition: color 0.2s, border-color 0.2s, transform 0.15s;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  position: relative;
+}
+.tab-bar a:hover {
+  color: var(--text);
+  text-decoration: none;
+  transform: translateY(-1px);
+}
+.tab-bar a.active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+  text-shadow: 0 0 12px rgba(196, 161, 255, 0.3);
+}
+/* Active tab glow underline */
+.tab-bar a.active::after {
+  content: '';
+  position: absolute;
+  bottom: -2px;
+  left: 20%;
+  right: 20%;
+  height: 2px;
+  background: var(--accent);
+  filter: blur(4px);
+}
 
-/* Main */
-main { max-width: 1200px; margin: 0 auto; padding: 24px; }
+/* ── Main ── */
+main {
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 32px;
+}
 
-/* Loading */
-.loading { text-align: center; color: var(--text-muted); padding: 60px; font-family: var(--mono); }
-.loading::before { content: '⠋ '; animation: spin 0.8s steps(10) infinite; }
-@keyframes spin { to { content: '⠿ '; } }
+/* ── Loading — Retro spinner ── */
+.loading {
+  text-align: center;
+  color: var(--text-muted);
+  padding: 80px;
+  font-family: var(--mono);
+  font-size: 0.85rem;
+  letter-spacing: 0.05em;
+  animation: flicker-in 0.8s ease-out;
+}
+.loading::before {
+  content: '[ ';
+  color: var(--accent-dim);
+}
+.loading::after {
+  content: ' ]';
+  color: var(--accent-dim);
+}
 
-/* Error */
-.error-banner { background: #7f1d1d; border: 1px solid var(--red); color: #fca5a5; padding: 12px 16px; border-radius: var(--radius); margin: 16px 0; font-family: var(--mono); font-size: 0.85rem; }
+/* ── Error ── */
+.error-banner {
+  background: linear-gradient(135deg, var(--red-dim) 0%, #450a0a 100%);
+  border: 1px solid rgba(248, 113, 113, 0.3);
+  color: #fca5a5;
+  padding: 14px 18px;
+  border-radius: var(--radius);
+  margin: 16px 0;
+  font-family: var(--mono);
+  font-size: 0.85rem;
+  box-shadow: 0 0 20px rgba(248, 113, 113, 0.08);
+}
 
-/* Session List */
-.search-box { width: 100%; background: var(--surface); border: 1px solid var(--border); color: var(--text); padding: 10px 14px; border-radius: var(--radius); font-family: var(--mono); font-size: 0.85rem; margin-bottom: 16px; outline: none; }
-.search-box:focus { border-color: var(--accent); }
+/* ── Search ── */
+.search-box {
+  width: 100%;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 12px 16px;
+  border-radius: var(--radius);
+  font-family: var(--mono);
+  font-size: 0.85rem;
+  margin-bottom: 16px;
+  outline: none;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+.search-box:focus { border-color: var(--accent); box-shadow: var(--glow-sm); }
 .search-box::placeholder { color: var(--text-dim); }
 
 
+/* ── Runs Table ── */
 .runs-table { width: 100%; border-collapse: collapse; }
-.runs-table th { text-align: left; padding: 8px 12px; color: var(--text-muted); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; border-bottom: 1px solid var(--border); font-weight: 500; }
-.runs-table td { padding: 10px 12px; border-bottom: 1px solid var(--border); font-family: var(--mono); font-size: 0.85rem; }
-.runs-table tr { cursor: pointer; transition: background 0.15s; }
-.runs-table tr:hover { background: var(--surface2); }
+.runs-table th { text-align: left; padding: 10px 14px; color: var(--text-dim); font-family: var(--mono); font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.08em; border-bottom: 1px solid var(--border); font-weight: 500; }
+.runs-table td { padding: 12px 14px; border-bottom: 1px solid var(--border); font-family: var(--mono); font-size: 0.85rem; }
+.runs-table tr { cursor: pointer; transition: background 0.2s, transform 0.15s; }
+.runs-table tr:hover { background: linear-gradient(90deg, var(--surface2) 0%, var(--surface) 100%); }
 .run-date { color: var(--text); white-space: nowrap; }
 .run-time { color: var(--text-muted); font-size: 0.8rem; }
 
-/* Status bar */
-.status-bar { display: flex; height: 8px; border-radius: 4px; overflow: hidden; min-width: 120px; background: var(--surface3); }
-.status-bar .seg-done { background: var(--green); }
-.status-bar .seg-running { background: var(--yellow); }
+/* ── Status bar — Glowing segments ── */
+.status-bar { display: flex; height: 6px; border-radius: 3px; overflow: hidden; min-width: 120px; background: var(--surface3); }
+.status-bar .seg-done { background: var(--green); box-shadow: 0 0 6px rgba(52, 211, 153, 0.4); }
+.status-bar .seg-running { background: var(--yellow); box-shadow: 0 0 6px rgba(251, 191, 36, 0.4); }
 .status-bar .seg-pending { background: var(--text-dim); }
-.status-bar .seg-failed { background: var(--red); }
+.status-bar .seg-failed { background: var(--red); box-shadow: 0 0 6px rgba(248, 113, 113, 0.4); }
+.status-bar .seg-retrying { background: var(--yellow); box-shadow: 0 0 6px rgba(251, 191, 36, 0.4); }
+.status-bar .seg-verifying { background: var(--cyan); box-shadow: 0 0 6px rgba(34, 211, 238, 0.4); }
 
-.status-counts { font-size: 0.8rem; color: var(--text-muted); margin-top: 4px; }
-.ecc-badge { display: inline-block; padding: 1px 6px; border-radius: 3px; font-size: 0.7rem; font-weight: 600; }
-.ecc-on { background: #14532d; color: #86efac; }
-.ecc-off { background: var(--surface3); color: var(--text-dim); }
+.status-counts { font-size: 0.75rem; color: var(--text-muted); margin-top: 4px; }
+.ecc-badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 0.65rem; font-weight: 600; font-family: var(--mono); letter-spacing: 0.04em; }
+.ecc-on { background: var(--green-dim); color: var(--green); border: 1px solid rgba(52, 211, 153, 0.2); }
+.ecc-off { background: var(--surface3); color: var(--text-dim); border: 1px solid var(--border); }
 
-/* Badges */
-.badge { display: inline-block; padding: 2px 8px; border-radius: 3px; font-size: 0.7rem; font-weight: 700; font-family: var(--mono); letter-spacing: 0.02em; }
-.badge-done { background: #14532d; color: #86efac; border: 1px solid #22c55e40; }
-.badge-running { background: #422006; color: #fcd34d; border: 1px solid #eab30840; animation: pulse 2s infinite; }
+/* ── Badges — Retro-futuristic ── */
+.badge {
+  display: inline-block;
+  padding: 2px 10px;
+  border-radius: 4px;
+  font-size: 0.65rem;
+  font-weight: 700;
+  font-family: var(--mono);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.badge-done { background: var(--green-dim); color: var(--green); border: 1px solid rgba(52, 211, 153, 0.25); }
+.badge-running { background: var(--yellow-dim); color: var(--yellow); border: 1px solid rgba(251, 191, 36, 0.25); animation: pulse 2s infinite; }
 .badge-pending { background: var(--surface3); color: var(--text-dim); border: 1px solid var(--border); }
-.badge-failed { background: #7f1d1d; color: #fca5a5; border: 1px solid #ef444440; }
-@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.6; } }
+.badge-failed { background: var(--red-dim); color: var(--red); border: 1px solid rgba(248, 113, 113, 0.25); }
+.badge-retrying { background: var(--yellow-dim); color: var(--yellow); border: 1px solid rgba(251, 191, 36, 0.25); animation: pulse 2s infinite; }
+.badge-verifying { background: rgba(14, 116, 144, 0.3); color: var(--cyan); border: 1px solid rgba(34, 211, 238, 0.25); animation: pulse 2s infinite; }
+.badge-verify-passed { background: var(--green-dim); color: var(--green); border: 1px solid rgba(52, 211, 153, 0.25); font-size: 0.6rem; }
+.badge-verify-failed { background: var(--red-dim); color: var(--red); border: 1px solid rgba(248, 113, 113, 0.25); font-size: 0.6rem; }
+.badge-verify-skipped { background: var(--surface3); color: var(--text-dim); border: 1px solid var(--border); font-size: 0.6rem; }
+@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
 
-.badge-opus { background: #3b0764; color: #c084fc; border: 1px solid #7c3aed40; }
-.badge-sonnet { background: #1e3a5f; color: #93c5fd; border: 1px solid #3b82f640; }
-.badge-haiku { background: #14532d; color: #86efac; border: 1px solid #22c55e40; }
+.badge-opus { background: rgba(59, 7, 100, 0.5); color: #c084fc; border: 1px solid rgba(139, 92, 246, 0.25); }
+.badge-sonnet { background: rgba(30, 58, 95, 0.5); color: var(--blue); border: 1px solid rgba(96, 165, 250, 0.25); }
+.badge-haiku { background: var(--green-dim); color: var(--green); border: 1px solid rgba(52, 211, 153, 0.25); }
 
-.badge-critical { background: #7f1d1d; color: #fca5a5; border: 1px solid #ef4444; font-weight: 800; }
-.badge-high { background: #78350f; color: #fcd34d; border: 1px solid #f59e0b; }
-.badge-medium { background: #1e3a5f; color: #93c5fd; border: 1px solid #3b82f6; }
-.badge-low { background: #14532d; color: #86efac; border: 1px solid #22c55e; }
+.badge-critical { background: var(--red-dim); color: var(--red); border: 1px solid var(--red); font-weight: 800; text-shadow: 0 0 8px rgba(248, 113, 113, 0.4); }
+.badge-high { background: var(--yellow-dim); color: var(--yellow); border: 1px solid var(--orange); }
+.badge-medium { background: rgba(30, 58, 95, 0.5); color: var(--blue); border: 1px solid var(--blue); }
+.badge-low { background: var(--green-dim); color: var(--green); border: 1px solid var(--green); }
 
-.tag { display: inline-block; padding: 1px 6px; border-radius: 3px; font-size: 0.7rem; background: var(--surface3); color: var(--text-muted); border: 1px solid var(--border); margin: 1px; }
+.tag {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 0.65rem;
+  background: var(--surface3);
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+  margin: 1px;
+  font-family: var(--mono);
+  letter-spacing: 0.02em;
+}
 
-/* Task cards grid */
-.task-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 12px; margin-top: 16px; }
-.task-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; transition: border-color 0.15s; }
-.task-card:hover { border-color: var(--accent); }
+/* ── Task Cards — Asymmetric Grid ── */
+.task-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+  gap: 16px;
+  margin-top: 20px;
+}
+/* Asymmetric: every 3rd card spans wider when possible */
+@media (min-width: 1080px) {
+  .task-grid { grid-template-columns: repeat(3, 1fr); }
+  .task-card:nth-child(7n+1) { grid-column: span 2; }
+}
+.task-card {
+  background: linear-gradient(135deg, var(--surface) 0%, var(--surface2) 100%);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 18px;
+  transition: border-color 0.25s, box-shadow 0.25s, transform 0.2s;
+  position: relative;
+  overflow: hidden;
+}
+.task-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 3px;
+  height: 100%;
+  background: var(--accent-dim);
+  opacity: 0;
+  transition: opacity 0.25s;
+}
+.task-card:hover {
+  border-color: var(--accent);
+  box-shadow: var(--glow-sm);
+  transform: translateY(-2px);
+}
+.task-card:hover::before { opacity: 1; background: var(--accent); }
 .task-card-header { display: flex; align-items: flex-start; gap: 8px; margin-bottom: 8px; }
-.task-card-name { font-weight: 600; font-size: 0.9rem; flex: 1; }
+.task-card-name { font-family: var(--display); font-weight: 600; font-size: 0.95rem; flex: 1; }
 .task-card-meta { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 10px; }
-.task-card-size { font-family: var(--mono); font-size: 0.75rem; color: var(--text-muted); }
-.task-card-actions { display: flex; gap: 8px; margin-top: 12px; }
-.btn { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: var(--radius); font-family: var(--mono); font-size: 0.75rem; cursor: pointer; border: 1px solid var(--border); background: var(--surface2); color: var(--text); transition: all 0.15s; text-decoration: none; }
-.btn:hover { background: var(--surface3); border-color: var(--accent); color: var(--accent); text-decoration: none; }
-.btn-primary { background: var(--accent2); border-color: var(--accent); color: white; }
-.btn-primary:hover { background: var(--accent); color: white; }
+.task-card-size { font-family: var(--mono); font-size: 0.72rem; color: var(--text-muted); }
+.task-card-actions { display: flex; gap: 8px; margin-top: 14px; }
 
-/* Run header */
-.run-header { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px; margin-bottom: 20px; }
-.run-header h2 { font-family: var(--mono); font-size: 1.1rem; margin-bottom: 8px; }
+/* ── Buttons ── */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 14px;
+  border-radius: var(--radius);
+  font-family: var(--mono);
+  font-size: 0.75rem;
+  cursor: pointer;
+  border: 1px solid var(--border);
+  background: var(--surface2);
+  color: var(--text);
+  transition: all 0.2s;
+  text-decoration: none;
+  letter-spacing: 0.02em;
+}
+.btn:hover {
+  background: var(--surface3);
+  border-color: var(--accent);
+  color: var(--accent);
+  text-decoration: none;
+  box-shadow: var(--glow-sm);
+}
+.btn-primary {
+  background: linear-gradient(135deg, var(--accent2) 0%, var(--accent-dim) 100%);
+  border-color: var(--accent);
+  color: white;
+}
+.btn-primary:hover {
+  background: var(--accent2);
+  color: white;
+  box-shadow: var(--glow-md);
+}
+
+/* ── Run header ── */
+.run-header {
+  background: linear-gradient(135deg, var(--surface) 0%, var(--surface2) 100%);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 24px;
+  margin-bottom: 24px;
+  position: relative;
+  overflow: hidden;
+  animation: stagger-in 0.5s ease-out;
+}
+.run-header::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 200px;
+  height: 200px;
+  background: radial-gradient(circle, rgba(139, 92, 246, 0.06) 0%, transparent 70%);
+  pointer-events: none;
+}
+.run-header h2 { font-family: var(--display); font-size: 1.2rem; margin-bottom: 8px; font-weight: 600; letter-spacing: -0.01em; }
 .run-header-meta { display: flex; flex-wrap: wrap; gap: 12px; font-size: 0.85rem; color: var(--text-muted); }
 
-/* Output view */
+/* ── Output view ── */
 .output-toolbar { display: flex; gap: 8px; margin-bottom: 16px; align-items: center; }
-.output-container { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 24px; }
-.output-container h1, .output-container h2, .output-container h3, .output-container h4 { color: var(--text); margin-top: 1.5em; margin-bottom: 0.5em; font-family: var(--sans); }
-.output-container h1 { font-size: 1.4rem; border-bottom: 1px solid var(--border); padding-bottom: 8px; }
+.output-container {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 28px;
+  animation: stagger-in 0.4s ease-out;
+}
+.output-container h1, .output-container h2, .output-container h3, .output-container h4 { color: var(--text); margin-top: 1.5em; margin-bottom: 0.5em; font-family: var(--display); }
+.output-container h1 { font-size: 1.4rem; border-bottom: 1px solid var(--border); padding-bottom: 10px; letter-spacing: -0.01em; }
 .output-container h2 { font-size: 1.15rem; }
 .output-container h3 { font-size: 1rem; color: var(--text-muted); }
 .output-container p { margin: 0.5em 0; }
 .output-container ul, .output-container ol { margin: 0.5em 0; padding-left: 1.5em; }
 .output-container li { margin: 0.3em 0; }
-.output-container code { font-family: var(--mono); font-size: 0.85em; background: var(--surface2); padding: 1px 5px; border-radius: 3px; }
-.output-container pre { background: var(--surface2); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px; overflow-x: auto; margin: 1em 0; position: relative; }
-.output-container pre code { background: transparent; padding: 0; font-size: 0.8rem; line-height: 1.5; }
+.output-container code { font-family: var(--mono); font-size: 0.85em; background: var(--surface2); padding: 2px 6px; border-radius: 4px; color: var(--cyan); }
+.output-container pre { background: var(--surface2); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; overflow-x: auto; margin: 1em 0; position: relative; }
+.output-container pre code { background: transparent; padding: 0; font-size: 0.8rem; line-height: 1.5; color: var(--text); }
 .output-container table { border-collapse: collapse; width: 100%; margin: 1em 0; font-size: 0.85rem; }
-.output-container th, .output-container td { border: 1px solid var(--border); padding: 6px 10px; text-align: left; }
-.output-container th { background: var(--surface2); font-weight: 600; color: var(--text-muted); }
-.output-container blockquote { border-left: 3px solid var(--accent); padding-left: 12px; color: var(--text-muted); margin: 1em 0; }
+.output-container th, .output-container td { border: 1px solid var(--border); padding: 8px 12px; text-align: left; }
+.output-container th { background: var(--surface2); font-weight: 600; color: var(--text-muted); font-family: var(--mono); font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.04em; }
+.output-container blockquote { border-left: 3px solid var(--accent); padding-left: 14px; color: var(--text-muted); margin: 1em 0; background: rgba(139, 92, 246, 0.03); padding: 10px 14px; border-radius: 0 var(--radius) var(--radius) 0; }
 .output-container hr { border: none; border-top: 1px solid var(--border); margin: 1.5em 0; }
 .output-container strong { color: var(--text); }
 .output-container a { color: var(--accent); }
 
-/* Copy button on code blocks */
-.copy-btn { position: absolute; top: 6px; right: 6px; padding: 3px 8px; font-size: 0.65rem; background: var(--surface3); border: 1px solid var(--border); color: var(--text-muted); border-radius: 3px; cursor: pointer; font-family: var(--mono); opacity: 0; transition: opacity 0.15s; }
+/* ── Copy button ── */
+.copy-btn { position: absolute; top: 8px; right: 8px; padding: 4px 10px; font-size: 0.65rem; background: var(--surface3); border: 1px solid var(--border); color: var(--text-muted); border-radius: 4px; cursor: pointer; font-family: var(--mono); opacity: 0; transition: all 0.2s; }
 pre:hover .copy-btn { opacity: 1; }
-.copy-btn:hover { background: var(--accent2); color: white; border-color: var(--accent); }
-.copy-btn.copied { background: var(--green); color: white; border-color: var(--green); }
+.copy-btn:hover { background: var(--accent2); color: white; border-color: var(--accent); box-shadow: var(--glow-sm); }
+.copy-btn.copied { background: var(--green-dim); color: var(--green); border-color: var(--green); }
 
-/* Collapsible sections */
+/* ── Collapsible sections ── */
 .collapsible { border: 1px solid var(--border); border-radius: var(--radius); margin: 12px 0; overflow: hidden; }
-.collapsible > summary { cursor: pointer; padding: 10px 14px; background: var(--surface2); font-weight: 600; font-size: 0.95rem; list-style: none; display: flex; align-items: center; gap: 8px; }
-.collapsible > summary::before { content: '▸'; color: var(--text-muted); font-family: var(--mono); font-size: 0.8rem; transition: transform 0.15s; }
-.collapsible[open] > summary::before { transform: rotate(90deg); }
+.collapsible > summary { cursor: pointer; padding: 12px 16px; background: var(--surface2); font-family: var(--display); font-weight: 600; font-size: 0.95rem; list-style: none; display: flex; align-items: center; gap: 8px; transition: background 0.2s; }
+.collapsible > summary::before { content: '▸'; color: var(--accent-dim); font-family: var(--mono); font-size: 0.8rem; transition: transform 0.2s, color 0.2s; }
+.collapsible[open] > summary::before { transform: rotate(90deg); color: var(--accent); }
 .collapsible > summary:hover { background: var(--surface3); }
 .collapsible > .section-content { padding: 16px; }
 
-/* Timeline */
-.timeline { position: relative; padding-left: 32px; }
-.timeline::before { content: ''; position: absolute; left: 11px; top: 0; bottom: 0; width: 2px; background: var(--border); }
+/* ── Timeline — Diagonal accent line ── */
+.timeline { position: relative; padding-left: 36px; }
+.timeline::before {
+  content: '';
+  position: absolute;
+  left: 12px;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: linear-gradient(180deg, var(--accent-dim), var(--border) 30%, var(--border) 70%, var(--accent-dim));
+}
 .tl-event { position: relative; margin-bottom: 12px; }
-.tl-dot { position: absolute; left: -27px; top: 8px; width: 12px; height: 12px; border-radius: 50%; border: 2px solid var(--border); background: var(--surface); }
-.tl-event.tl-init .tl-dot { background: var(--accent); border-color: var(--accent); }
-.tl-event.tl-tool .tl-dot { background: var(--blue); border-color: var(--blue); }
-.tl-event.tl-thinking .tl-dot { background: var(--yellow); border-color: var(--yellow); }
-.tl-event.tl-text .tl-dot { background: var(--green); border-color: var(--green); }
-.tl-event.tl-progress .tl-dot { width: 6px; height: 6px; left: -24px; top: 10px; background: var(--text-dim); border: none; }
-.tl-event.tl-notification .tl-dot { background: var(--orange); border-color: var(--orange); }
+.tl-dot { position: absolute; left: -30px; top: 8px; width: 12px; height: 12px; border-radius: 50%; border: 2px solid var(--border); background: var(--surface); transition: all 0.2s; }
+.tl-event.tl-init .tl-dot { background: var(--accent); border-color: var(--accent); box-shadow: 0 0 8px rgba(196, 161, 255, 0.4); }
+.tl-event.tl-tool .tl-dot { background: var(--blue); border-color: var(--blue); box-shadow: 0 0 8px rgba(96, 165, 250, 0.3); }
+.tl-event.tl-thinking .tl-dot { background: var(--yellow); border-color: var(--yellow); box-shadow: 0 0 8px rgba(251, 191, 36, 0.3); }
+.tl-event.tl-text .tl-dot { background: var(--green); border-color: var(--green); box-shadow: 0 0 8px rgba(52, 211, 153, 0.3); }
+.tl-event.tl-progress .tl-dot { width: 6px; height: 6px; left: -27px; top: 10px; background: var(--text-dim); border: none; }
+.tl-event.tl-notification .tl-dot { background: var(--orange); border-color: var(--orange); box-shadow: 0 0 8px rgba(251, 146, 60, 0.3); }
 
-.tl-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
-.tl-card-header { padding: 8px 12px; display: flex; align-items: center; gap: 8px; font-family: var(--mono); font-size: 0.8rem; cursor: pointer; }
+.tl-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; transition: border-color 0.2s; }
+.tl-card:hover { border-color: var(--border-light); }
+.tl-card-header { padding: 10px 14px; display: flex; align-items: center; gap: 8px; font-family: var(--mono); font-size: 0.8rem; cursor: pointer; transition: background 0.15s; }
 .tl-card-header:hover { background: var(--surface2); }
-.tl-card-body { padding: 12px; border-top: 1px solid var(--border); font-family: var(--mono); font-size: 0.75rem; max-height: 300px; overflow: auto; white-space: pre-wrap; word-break: break-word; color: var(--text-muted); background: var(--surface2); }
+.tl-card-body { padding: 14px; border-top: 1px solid var(--border); font-family: var(--mono); font-size: 0.75rem; max-height: 300px; overflow: auto; white-space: pre-wrap; word-break: break-word; color: var(--text-muted); background: var(--surface2); }
 .tl-tool-icon { font-size: 0.9rem; }
-.tl-tool-name { font-weight: 600; color: var(--blue); }
+.tl-tool-name { font-weight: 600; color: var(--cyan); }
 .tl-tool-summary { color: var(--text-muted); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tl-compact { font-family: var(--mono); font-size: 0.75rem; color: var(--text-dim); padding: 2px 0; }
-.tl-meta { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px; margin-bottom: 16px; display: flex; gap: 20px; flex-wrap: wrap; font-family: var(--mono); font-size: 0.8rem; }
-.tl-meta-item { display: flex; flex-direction: column; }
-.tl-meta-label { color: var(--text-dim); font-size: 0.7rem; text-transform: uppercase; }
+.tl-meta {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 16px 20px;
+  margin-bottom: 20px;
+  display: flex;
+  gap: 24px;
+  flex-wrap: wrap;
+  font-family: var(--mono);
+  font-size: 0.8rem;
+  animation: stagger-in 0.4s ease-out;
+}
+.tl-meta-item { display: flex; flex-direction: column; gap: 2px; }
+.tl-meta-label { color: var(--text-dim); font-size: 0.65rem; text-transform: uppercase; letter-spacing: 0.06em; }
 .tl-meta-value { color: var(--text); font-weight: 600; }
 
-/* Config screen */
-.config-header { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; flex-wrap: wrap; }
+/* ── Config screen ── */
+.config-header { display: flex; align-items: center; gap: 12px; margin-bottom: 20px; flex-wrap: wrap; animation: stagger-in 0.4s ease-out; }
 .config-tabs { display: flex; gap: 0; border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
-.config-tab { padding: 8px 18px; font-family: var(--mono); font-size: 0.8rem; cursor: pointer; background: var(--surface); color: var(--text-muted); border: none; border-right: 1px solid var(--border); transition: all 0.15s; }
+.config-tab { padding: 10px 20px; font-family: var(--mono); font-size: 0.78rem; cursor: pointer; background: var(--surface); color: var(--text-muted); border: none; border-right: 1px solid var(--border); transition: all 0.2s; letter-spacing: 0.02em; }
 .config-tab:last-child { border-right: none; }
 .config-tab:hover { background: var(--surface2); color: var(--text); }
-.config-tab.active { background: var(--accent2); color: white; }
+.config-tab.active { background: var(--accent2); color: white; box-shadow: var(--glow-sm); }
 .scope-toggle { display: flex; align-items: center; gap: 8px; margin-left: auto; font-family: var(--mono); font-size: 0.75rem; color: var(--text-muted); }
 .scope-toggle select { background: var(--surface); border: 1px solid var(--border); color: var(--text); padding: 5px 10px; border-radius: var(--radius); font-family: var(--mono); font-size: 0.75rem; cursor: pointer; }
 .config-toolbar { display: flex; align-items: center; gap: 8px; margin-bottom: 16px; }
-.config-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 12px; }
-.config-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; transition: border-color 0.15s; display: flex; flex-direction: column; }
-.config-card:hover { border-color: var(--border-light); }
+.config-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 14px; }
+.config-card {
+  background: linear-gradient(135deg, var(--surface) 0%, var(--surface2) 100%);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 18px;
+  transition: border-color 0.25s, box-shadow 0.25s, transform 0.2s;
+  display: flex;
+  flex-direction: column;
+}
+.config-card:hover { border-color: var(--accent-dim); box-shadow: var(--glow-sm); transform: translateY(-1px); }
 .config-card-header { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
 .config-card-name { font-family: var(--mono); font-weight: 600; font-size: 0.9rem; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .config-card-desc { font-size: 0.8rem; color: var(--text-muted); line-height: 1.4; margin-bottom: 10px; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
 .config-card-actions { display: flex; gap: 6px; margin-top: auto; padding-top: 10px; }
-.badge-scope { display: inline-block; padding: 2px 8px; border-radius: 3px; font-size: 0.7rem; font-weight: 700; font-family: var(--mono); }
-.badge-global { background: #1e3a5f; color: #93c5fd; border: 1px solid #3b82f640; }
-.badge-project { background: #3b0764; color: #c084fc; border: 1px solid #7c3aed40; }
-.btn-danger { background: #7f1d1d; border-color: #ef444480; color: #fca5a5; }
-.btn-danger:hover { background: #991b1b; border-color: var(--red); color: white; }
-.btn-sm { padding: 4px 10px; font-size: 0.7rem; }
-.modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.7); z-index: 200; display: flex; align-items: center; justify-content: center; padding: 20px; }
-.modal { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; width: 100%; max-width: 700px; max-height: 85vh; display: flex; flex-direction: column; }
-.modal-header { display: flex; align-items: center; gap: 12px; padding: 16px 20px; border-bottom: 1px solid var(--border); }
-.modal-header h3 { font-family: var(--mono); font-size: 1rem; margin: 0; flex: 1; }
-.modal-close { background: none; border: none; color: var(--text-muted); font-size: 1.2rem; cursor: pointer; padding: 4px 8px; }
-.modal-close:hover { color: var(--text); }
-.modal-body { padding: 20px; overflow-y: auto; flex: 1; }
-.modal-footer { display: flex; justify-content: flex-end; gap: 8px; padding: 12px 20px; border-top: 1px solid var(--border); }
-.form-group { margin-bottom: 14px; }
-.form-label { display: block; font-family: var(--mono); font-size: 0.75rem; color: var(--text-muted); margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.03em; }
-.form-input { width: 100%; background: var(--surface2); border: 1px solid var(--border); color: var(--text); padding: 8px 12px; border-radius: var(--radius); font-family: var(--mono); font-size: 0.85rem; outline: none; box-sizing: border-box; }
-.form-input:focus { border-color: var(--accent); }
-.form-textarea { width: 100%; min-height: 300px; background: var(--surface2); border: 1px solid var(--border); color: var(--text); padding: 12px; border-radius: var(--radius); font-family: var(--mono); font-size: 0.8rem; line-height: 1.5; resize: vertical; outline: none; box-sizing: border-box; }
-.form-textarea:focus { border-color: var(--accent); }
-.config-empty { text-align: center; color: var(--text-muted); padding: 40px; font-family: var(--mono); font-size: 0.85rem; }
-.hook-card-name { font-family: var(--mono); font-weight: 700; font-size: 1rem; margin-bottom: 6px; text-transform: capitalize; }
+.badge-scope { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 0.65rem; font-weight: 700; font-family: var(--mono); letter-spacing: 0.04em; }
+.badge-global { background: rgba(30, 58, 95, 0.5); color: var(--blue); border: 1px solid rgba(96, 165, 250, 0.2); }
+.badge-project { background: rgba(59, 7, 100, 0.5); color: #c084fc; border: 1px solid rgba(139, 92, 246, 0.2); }
+.btn-danger { background: var(--red-dim); border-color: rgba(248, 113, 113, 0.3); color: var(--red); }
+.btn-danger:hover { background: #991b1b; border-color: var(--red); color: white; box-shadow: 0 0 12px rgba(248, 113, 113, 0.15); }
+.btn-sm { padding: 5px 12px; font-size: 0.7rem; }
+
+/* ── Modal ── */
+.modal-overlay { position: fixed; inset: 0; background: rgba(7, 7, 10, 0.85); backdrop-filter: blur(8px); z-index: 200; display: flex; align-items: center; justify-content: center; padding: 20px; }
+.modal {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  width: 100%;
+  max-width: 700px;
+  max-height: 85vh;
+  display: flex;
+  flex-direction: column;
+  box-shadow: var(--glow-lg);
+  animation: stagger-in 0.3s ease-out;
+}
+.modal-header { display: flex; align-items: center; gap: 12px; padding: 18px 24px; border-bottom: 1px solid var(--border); }
+.modal-header h3 { font-family: var(--display); font-size: 1rem; margin: 0; flex: 1; font-weight: 600; }
+.modal-close { background: none; border: none; color: var(--text-muted); font-size: 1.2rem; cursor: pointer; padding: 4px 8px; transition: color 0.2s; }
+.modal-close:hover { color: var(--red); }
+.modal-body { padding: 24px; overflow-y: auto; flex: 1; }
+.modal-footer { display: flex; justify-content: flex-end; gap: 8px; padding: 14px 24px; border-top: 1px solid var(--border); }
+.form-group { margin-bottom: 16px; }
+.form-label { display: block; font-family: var(--mono); font-size: 0.7rem; color: var(--text-dim); margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.06em; }
+.form-input { width: 100%; background: var(--surface2); border: 1px solid var(--border); color: var(--text); padding: 10px 14px; border-radius: var(--radius); font-family: var(--mono); font-size: 0.85rem; outline: none; box-sizing: border-box; transition: border-color 0.2s, box-shadow 0.2s; }
+.form-input:focus { border-color: var(--accent); box-shadow: var(--glow-sm); }
+.form-textarea { width: 100%; min-height: 300px; background: var(--surface2); border: 1px solid var(--border); color: var(--text); padding: 14px; border-radius: var(--radius); font-family: var(--mono); font-size: 0.8rem; line-height: 1.5; resize: vertical; outline: none; box-sizing: border-box; transition: border-color 0.2s, box-shadow 0.2s; }
+.form-textarea:focus { border-color: var(--accent); box-shadow: var(--glow-sm); }
+.config-empty { text-align: center; color: var(--text-muted); padding: 48px; font-family: var(--mono); font-size: 0.85rem; }
+.hook-card-name { font-family: var(--display); font-weight: 700; font-size: 1rem; margin-bottom: 6px; text-transform: capitalize; }
 .hook-card-desc { font-size: 0.85rem; color: var(--text-muted); }
 
-/* Responsive */
-@media (max-width: 768px) {
-  main { padding: 12px; }
-  .task-grid { grid-template-columns: 1fr; }
-  .config-grid { grid-template-columns: 1fr; }
-  header { padding: 10px 16px; }
-  .tab-bar { padding: 0 16px; }
-  .tab-bar a { padding: 8px 12px; font-size: 0.75rem; }
-  .config-header { flex-direction: column; align-items: flex-start; }
-  .scope-toggle { margin-left: 0; }
-}
 
-/* Pipeline view */
-.pipeline-header { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px; margin-bottom: 20px; }
-.pipeline-header h2 { font-family: var(--mono); font-size: 1.1rem; margin-bottom: 8px; }
+
+/* ── Pipeline view ── */
+.pipeline-header {
+  background: linear-gradient(135deg, var(--surface) 0%, var(--surface2) 100%);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 24px;
+  margin-bottom: 24px;
+  position: relative;
+  overflow: hidden;
+  animation: stagger-in 0.5s ease-out;
+}
+.pipeline-header::after {
+  content: '';
+  position: absolute;
+  top: -50%;
+  right: -10%;
+  width: 300px;
+  height: 300px;
+  background: radial-gradient(circle, rgba(34, 211, 238, 0.04) 0%, transparent 70%);
+  pointer-events: none;
+}
+.pipeline-header h2 { font-family: var(--display); font-size: 1.2rem; margin-bottom: 8px; font-weight: 600; letter-spacing: -0.01em; }
 .pipeline-meta { display: flex; flex-wrap: wrap; gap: 12px; font-size: 0.85rem; color: var(--text-muted); }
 
-/* Train visualization */
-.train-container { display: flex; align-items: center; overflow-x: auto; padding: 24px 0 32px; gap: 0; }
-.train-car { background: var(--surface); border: 2px solid var(--border); border-radius: 8px; padding: 16px 20px; min-width: 200px; max-width: 280px; flex-shrink: 0; cursor: pointer; transition: border-color 0.2s, box-shadow 0.2s, transform 0.15s; position: relative; }
-.train-car:hover { border-color: var(--accent); transform: translateY(-2px); box-shadow: 0 4px 12px rgba(168, 85, 247, 0.15); }
-.train-car.selected { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+/* ── Train visualization — Glowing cars ── */
+.train-container { display: flex; align-items: center; overflow-x: auto; padding: 28px 0 36px; gap: 0; }
+.train-car {
+  background: linear-gradient(135deg, var(--surface) 0%, var(--surface2) 100%);
+  border: 2px solid var(--border);
+  border-radius: 12px;
+  padding: 18px 22px;
+  min-width: 210px;
+  max-width: 290px;
+  flex-shrink: 0;
+  cursor: pointer;
+  transition: border-color 0.25s, box-shadow 0.25s, transform 0.2s;
+  position: relative;
+  overflow: hidden;
+}
+.train-car::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: transparent;
+  transition: background 0.3s;
+}
+.train-car:hover { border-color: var(--accent); transform: translateY(-3px); box-shadow: var(--glow-md); }
+.train-car:hover::before { background: var(--accent); }
+.train-car.selected { border-color: var(--accent); box-shadow: var(--glow-md); }
+.train-car.selected::before { background: var(--accent); }
 .train-car.pending { border-color: var(--text-dim); }
 .train-car.running { border-color: var(--yellow); animation: train-pulse 2s ease-in-out infinite; }
+.train-car.running::before { background: var(--yellow); }
 .train-car.done { border-color: var(--green); }
+.train-car.done::before { background: var(--green); }
 .train-car.failed { border-color: var(--red); }
+.train-car.failed::before { background: var(--red); }
 @keyframes train-pulse {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(234, 179, 8, 0); border-color: var(--yellow); }
-  50% { box-shadow: 0 0 16px 2px rgba(234, 179, 8, 0.25); border-color: #fcd34d; }
+  0%, 100% { box-shadow: 0 0 0 0 rgba(251, 191, 36, 0); border-color: var(--yellow); }
+  50% { box-shadow: 0 0 20px 4px rgba(251, 191, 36, 0.15); border-color: #fcd34d; }
 }
 .train-car-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
-.train-car-num { font-family: var(--mono); font-size: 0.65rem; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.05em; }
-.train-car-name { font-weight: 600; font-size: 0.95rem; margin-bottom: 8px; color: var(--text); }
-.train-car-stats { display: flex; gap: 10px; font-family: var(--mono); font-size: 0.75rem; color: var(--text-muted); }
+.train-car-num { font-family: var(--mono); font-size: 0.6rem; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.08em; }
+.train-car-name { font-family: var(--display); font-weight: 600; font-size: 0.95rem; margin-bottom: 8px; color: var(--text); }
+.train-car-stats { display: flex; gap: 10px; font-family: var(--mono); font-size: 0.72rem; color: var(--text-muted); }
 .train-car-stats span { display: flex; align-items: center; gap: 3px; }
-.train-car-expand { font-family: var(--mono); font-size: 0.65rem; color: var(--text-dim); margin-top: 8px; transition: color 0.15s; }
+.train-car-expand { font-family: var(--mono); font-size: 0.62rem; color: var(--text-dim); margin-top: 8px; transition: color 0.2s; text-transform: uppercase; letter-spacing: 0.04em; }
 .train-car:hover .train-car-expand { color: var(--accent); }
 
-.train-connector { display: flex; align-items: center; flex-shrink: 0; width: 40px; position: relative; }
-.train-connector-line { width: 100%; height: 2px; background: var(--border); position: relative; }
-.train-connector-arrow { position: absolute; right: -1px; top: 50%; transform: translateY(-50%); width: 0; height: 0; border-top: 5px solid transparent; border-bottom: 5px solid transparent; border-left: 8px solid var(--border); }
-.train-connector.active .train-connector-line { background: var(--green); }
+.train-connector { display: flex; align-items: center; flex-shrink: 0; width: 44px; position: relative; }
+.train-connector-line { width: 100%; height: 2px; background: var(--border); position: relative; transition: background 0.3s; }
+.train-connector-arrow { position: absolute; right: -1px; top: 50%; transform: translateY(-50%); width: 0; height: 0; border-top: 5px solid transparent; border-bottom: 5px solid transparent; border-left: 8px solid var(--border); transition: border-left-color 0.3s; }
+.train-connector.active .train-connector-line { background: var(--green); box-shadow: 0 0 8px rgba(52, 211, 153, 0.3); }
 .train-connector.active .train-connector-arrow { border-left-color: var(--green); }
 
-/* Train task breakdown panel */
-.train-tasks-panel { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); margin-top: 16px; overflow: hidden; animation: slide-down 0.2s ease-out; }
-@keyframes slide-down { from { opacity: 0; transform: translateY(-8px); } to { opacity: 1; transform: translateY(0); } }
+/* ── Train task breakdown panel ── */
+.train-tasks-panel { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); margin-top: 20px; overflow: hidden; animation: slide-down 0.25s ease-out; }
+@keyframes slide-down { from { opacity: 0; transform: translateY(-10px); } to { opacity: 1; transform: translateY(0); } }
 .train-tasks-header { display: flex; align-items: center; gap: 10px; padding: 12px 16px; border-bottom: 1px solid var(--border); }
 .train-tasks-header h3 { font-family: var(--mono); font-size: 0.85rem; margin: 0; }
 .train-tasks-list { padding: 4px 0; }
@@ -288,9 +708,9 @@ pre:hover .copy-btn { opacity: 1; }
 .pipeline-arrow { color: var(--text-dim); font-size: 1.4rem; padding: 0 6px; flex-shrink: 0; align-self: center; margin-bottom: 20px; }
 
 .pipelines-section { margin-bottom: 28px; }
-.section-title { font-family: var(--mono); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); margin-bottom: 10px; padding-bottom: 6px; border-bottom: 1px solid var(--border); }
+.section-title { font-family: var(--mono); font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-dim); margin-bottom: 12px; padding-bottom: 8px; border-bottom: 1px solid var(--border); }
 .pipeline-list-table { width: 100%; border-collapse: collapse; margin-bottom: 8px; }
-.pipeline-list-table th { text-align: left; padding: 8px 12px; color: var(--text-muted); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; border-bottom: 1px solid var(--border); font-weight: 500; }
+.pipeline-list-table th { text-align: left; padding: 10px 14px; color: var(--text-dim); font-family: var(--mono); font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.08em; border-bottom: 1px solid var(--border); font-weight: 500; }
 .pipeline-list-table td { padding: 10px 12px; border-bottom: 1px solid var(--border); font-family: var(--mono); font-size: 0.85rem; }
 .pipeline-list-table tr { cursor: pointer; transition: background 0.15s; }
 .pipeline-list-table tr:hover { background: var(--surface2); }
@@ -301,19 +721,29 @@ pre:hover .copy-btn { opacity: 1; }
 .stage-pill-done { background: #14532d; color: #86efac; }
 .stage-pill-failed { background: #7f1d1d; color: #fca5a5; }
 
-/* Workspace */
-.ws-top { display: flex; gap: 12px; margin-bottom: 20px; align-items: flex-end; }
+/* ── Workspace — Diagonal offset layout ── */
+.ws-top { display: flex; gap: 14px; margin-bottom: 24px; align-items: flex-end; animation: stagger-in 0.4s ease-out; }
+.ws-layout { display: flex; gap: 24px; }
+.ws-main { flex: 1; min-width: 0; }
+.ws-sidebar { width: 400px; flex-shrink: 0; display: flex; flex-direction: column; gap: 18px; /* Diagonal offset */ margin-top: 32px; }
+@media (max-width: 1100px) { .ws-layout { flex-direction: column; } .ws-sidebar { width: 100%; margin-top: 0; } }
 .ws-select { flex: 1; }
 .ws-select label { display: block; font-family: var(--mono); font-size: 0.75rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 4px; }
-.ws-select select, .ws-select input[type="text"] { width: 100%; background: var(--surface); border: 1px solid var(--border); color: var(--text); padding: 8px 12px; border-radius: var(--radius); font-family: var(--mono); font-size: 0.85rem; outline: none; }
-.ws-select select:focus, .ws-select input[type="text"]:focus { border-color: var(--accent); }
+.ws-select select, .ws-select input[type="text"] { width: 100%; background: var(--surface); border: 1px solid var(--border); color: var(--text); padding: 10px 14px; border-radius: var(--radius); font-family: var(--mono); font-size: 0.85rem; outline: none; transition: border-color 0.2s, box-shadow 0.2s; }
+.ws-select select:focus, .ws-select input[type="text"]:focus { border-color: var(--accent); box-shadow: var(--glow-sm); }
 .ws-file-tabs { display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 16px; }
-.ws-file-tab { font-family: var(--mono); font-size: 0.75rem; padding: 4px 10px; border-radius: var(--radius); cursor: pointer; border: 1px solid var(--border); background: var(--surface); color: var(--text-muted); transition: all 0.15s; }
-.ws-file-tab:hover { border-color: var(--accent); color: var(--text); }
-.ws-file-tab.active { background: var(--accent2); border-color: var(--accent); color: white; }
+.ws-file-tab { font-family: var(--mono); font-size: 0.72rem; padding: 6px 12px; border-radius: var(--radius); cursor: pointer; border: 1px solid var(--border); background: var(--surface); color: var(--text-muted); transition: all 0.2s; letter-spacing: 0.02em; }
+.ws-file-tab:hover { border-color: var(--accent); color: var(--text); box-shadow: var(--glow-sm); }
+.ws-file-tab.active { background: var(--accent2); border-color: var(--accent); color: white; box-shadow: var(--glow-sm); }
 .ws-file-tab .file-count { font-size: 0.65rem; opacity: 0.7; margin-left: 4px; }
-.ws-task-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px; transition: border-color 0.15s; }
-.ws-task-card:hover { border-color: var(--border-light); }
+.ws-task-card {
+  background: linear-gradient(135deg, var(--surface) 0%, var(--surface2) 100%);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px;
+  transition: border-color 0.25s, box-shadow 0.25s, transform 0.2s;
+}
+.ws-task-card:hover { border-color: var(--accent-dim); box-shadow: var(--glow-sm); transform: translateY(-1px); }
 .ws-task-header { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
 .ws-task-name { font-weight: 600; font-size: 0.9rem; flex: 1; }
 .ws-task-tags { display: flex; flex-wrap: wrap; gap: 3px; margin-bottom: 10px; }
@@ -321,11 +751,29 @@ pre:hover .copy-btn { opacity: 1; }
 .ws-task-tags .tag-skill { background: #3b0764; color: #c084fc; border-color: #7c3aed40; }
 .ws-task-prompt { font-family: var(--mono); font-size: 0.75rem; color: var(--text-muted); max-height: 40px; overflow: hidden; text-overflow: ellipsis; margin-bottom: 10px; white-space: nowrap; }
 .ws-task-actions { display: flex; gap: 6px; }
-.btn-success { border-color: #22c55e60; color: #86efac; }
-.btn-success:hover { background: #14532d; border-color: var(--green); color: #86efac; }
-/* Brainstorm panel */
-.ws-brainstorm { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 16px; margin-bottom: 20px; }
-.ws-brainstorm h3 { margin: 0 0 12px 0; font-size: 1rem; color: var(--text); }
+.btn-success { border-color: rgba(52, 211, 153, 0.3); color: var(--green); }
+.btn-success:hover { background: var(--green-dim); border-color: var(--green); color: var(--green); box-shadow: 0 0 12px rgba(52, 211, 153, 0.1); }
+/* ── Brainstorm panel ── */
+.ws-brainstorm {
+  background: linear-gradient(135deg, var(--surface) 0%, var(--surface2) 100%);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 18px;
+  margin-bottom: 20px;
+  position: relative;
+  overflow: hidden;
+}
+.ws-brainstorm::before {
+  content: '';
+  position: absolute;
+  top: -50px;
+  right: -50px;
+  width: 150px;
+  height: 150px;
+  background: radial-gradient(circle, rgba(139, 92, 246, 0.06) 0%, transparent 70%);
+  pointer-events: none;
+}
+.ws-brainstorm h3 { margin: 0 0 14px 0; font-family: var(--display); font-size: 1rem; color: var(--text); font-weight: 600; }
 .ws-brainstorm-row { display: flex; gap: 12px; align-items: center; }
 .ws-brainstorm-row select { padding: 8px 12px; border-radius: 4px; border: 1px solid var(--border); background: var(--bg); color: var(--text); }
 /* Tasks.md editor */
@@ -346,11 +794,17 @@ pre:hover .copy-btn { opacity: 1; }
 .ws-pipeline-name { font-family: var(--mono); font-size: 0.85rem; flex: 1; }
 .ws-pipeline-stages { font-size: 0.75rem; color: var(--text-muted); }
 .ws-empty { text-align: center; color: var(--text-muted); padding: 40px; font-family: var(--mono); font-size: 0.85rem; }
-/* Active runs panel */
-.ws-active-runs { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 16px; margin-bottom: 20px; }
-.ws-active-runs h3 { margin: 0 0 12px 0; font-size: 1rem; color: var(--text); }
+/* ── Active runs panel ── */
+.ws-active-runs {
+  background: linear-gradient(135deg, var(--surface) 0%, var(--surface2) 100%);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 18px;
+  margin-bottom: 20px;
+}
+.ws-active-runs h3 { margin: 0 0 14px 0; font-family: var(--display); font-size: 1rem; color: var(--text); font-weight: 600; }
 .ws-run-row { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 6px; background: var(--bg); border: 1px solid var(--border); margin-bottom: 6px; font-family: var(--mono); font-size: 0.8rem; }
-.ws-run-spinner { width: 14px; height: 14px; border: 2px solid #422006; border-top-color: #fcd34d; border-radius: 50%; animation: spin 0.8s linear infinite; flex-shrink: 0; }
+.ws-run-spinner { width: 14px; height: 14px; border: 2px solid var(--yellow-dim); border-top-color: var(--yellow); border-radius: 50%; animation: spin 0.8s linear infinite; flex-shrink: 0; }
 .ws-run-name { flex: 1; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ws-run-id { color: var(--text-muted); font-size: 0.72rem; }
 .ws-run-elapsed { color: var(--text-muted); white-space: nowrap; }
@@ -358,10 +812,10 @@ pre:hover .copy-btn { opacity: 1; }
 .ws-run-link:hover { text-decoration: underline; }
 .ws-no-runs { color: var(--text-muted); font-family: var(--mono); font-size: 0.8rem; }
 @keyframes spin { to { transform: rotate(360deg); } }
-.ws-section-title { font-family: var(--mono); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); margin-bottom: 10px; display: flex; align-items: center; gap: 8px; }
+.ws-section-title { font-family: var(--mono); font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-dim); margin-bottom: 12px; display: flex; align-items: center; gap: 8px; }
 .ws-checks { display: flex; flex-wrap: wrap; gap: 6px; max-height: 140px; overflow-y: auto; padding: 4px; }
-.ws-check { display: flex; align-items: center; gap: 4px; font-family: var(--mono); font-size: 0.75rem; color: var(--text-muted); cursor: pointer; padding: 2px 6px; border-radius: 3px; border: 1px solid var(--border); background: var(--surface); transition: all 0.15s; user-select: none; }
-.ws-check:hover { border-color: var(--accent); }
+.ws-check { display: flex; align-items: center; gap: 4px; font-family: var(--mono); font-size: 0.72rem; color: var(--text-muted); cursor: pointer; padding: 4px 8px; border-radius: 4px; border: 1px solid var(--border); background: var(--surface); transition: all 0.2s; user-select: none; }
+.ws-check:hover { border-color: var(--accent); box-shadow: var(--glow-sm); }
 .ws-check input { accent-color: var(--accent); }
 .ws-check.checked { background: var(--surface3); border-color: var(--accent); color: var(--text); }
 /* Pipeline Guide section */
@@ -378,19 +832,21 @@ pre:hover .copy-btn { opacity: 1; }
 .pipeline-templates select { flex: 1; min-width: 180px; background: var(--surface); border: 1px solid var(--border); color: var(--text); padding: 7px 10px; border-radius: var(--radius); font-family: var(--mono); font-size: 0.82rem; outline: none; }
 .pipeline-templates select:focus { border-color: var(--accent); }
 
-/* Workspace sections */
+/* ── Workspace sections ── */
 .ws-section {
-  background: var(--surface);
+  background: linear-gradient(135deg, var(--surface) 0%, var(--surface2) 100%);
   border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 16px;
+  border-radius: var(--radius-lg);
+  padding: 18px;
   margin-bottom: 20px;
 }
 
 .ws-section h3 {
-  margin: 0 0 12px 0;
+  margin: 0 0 14px 0;
+  font-family: var(--display);
   font-size: 1rem;
   color: var(--text);
+  font-weight: 600;
 }
 
 .ws-active-run {
@@ -436,27 +892,134 @@ pre:hover .copy-btn { opacity: 1; }
 .runs-filter {
   display: flex;
   align-items: center;
-  gap: 10px;
-  margin-bottom: 16px;
+  gap: 12px;
+  margin-bottom: 18px;
 }
-.runs-filter label { color: var(--text-muted); font-size: 0.8rem; white-space: nowrap; }
-.runs-filter select { background: var(--surface); border: 1px solid var(--border); color: var(--text); padding: 6px 10px; border-radius: var(--radius); font-family: var(--mono); font-size: 0.82rem; outline: none; flex: 1; max-width: 360px; }
-.runs-filter select:focus { border-color: var(--accent); }
+.runs-filter label { color: var(--text-muted); font-family: var(--mono); font-size: 0.75rem; white-space: nowrap; letter-spacing: 0.04em; text-transform: uppercase; }
+.runs-filter select { background: var(--surface); border: 1px solid var(--border); color: var(--text); padding: 8px 12px; border-radius: var(--radius); font-family: var(--mono); font-size: 0.82rem; outline: none; flex: 1; max-width: 360px; transition: border-color 0.2s, box-shadow 0.2s; }
+.runs-filter select:focus { border-color: var(--accent); box-shadow: var(--glow-sm); }
+
+/* ── Pipeline Mapper ── */
+.mapper-setup {
+  background: linear-gradient(135deg, var(--surface) 0%, var(--surface2) 100%);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 24px;
+  margin-bottom: 24px;
+  animation: stagger-in 0.4s ease-out;
+}
+.mapper-setup h3 { font-family: var(--display); font-size: 1.1rem; margin-bottom: 16px; font-weight: 600; }
+.mapper-setup-row { display: flex; gap: 12px; align-items: flex-end; flex-wrap: wrap; }
+.mapper-setup-field { flex: 1; min-width: 200px; }
+.mapper-setup-field label { display: block; font-family: var(--mono); font-size: 0.75rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 4px; }
+.mapper-setup-field select { width: 100%; background: var(--surface2); border: 1px solid var(--border); color: var(--text); padding: 8px 12px; border-radius: var(--radius); font-family: var(--mono); font-size: 0.85rem; outline: none; }
+.mapper-setup-field select:focus { border-color: var(--accent); }
+.mapper-tasks-files { display: flex; gap: 8px; align-items: center; }
+.mapper-tasks-files select { flex: 1; }
+.mapper-selected-files { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.mapper-file-tag { display: inline-flex; align-items: center; gap: 6px; background: var(--surface2); border: 1px solid var(--border-light); border-radius: 4px; padding: 4px 10px; font-family: var(--mono); font-size: 0.75rem; color: var(--text); }
+.mapper-file-remove { background: none; border: none; color: var(--text-muted); cursor: pointer; font-size: 1rem; line-height: 1; padding: 0 2px; }
+.mapper-file-remove:hover { color: var(--red); }
+
+.mapper-columns { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin-bottom: 24px; min-height: 300px; }
+@media (max-width: 768px) { .mapper-columns { grid-template-columns: 1fr; } }
+.mapper-col {
+  background: linear-gradient(135deg, var(--surface) 0%, var(--surface2) 100%);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 18px;
+  display: flex;
+  flex-direction: column;
+}
+.mapper-col-header { font-family: var(--mono); font-size: 0.78rem; font-weight: 600; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 14px; display: flex; align-items: center; gap: 8px; }
+.mapper-col-header .count { font-weight: 400; font-size: 0.72rem; color: var(--text-dim); }
+
+.mapper-task { background: var(--surface2); border: 1px solid var(--border); border-radius: var(--radius); padding: 12px 14px; margin-bottom: 8px; cursor: grab; transition: border-color 0.2s, opacity 0.2s, box-shadow 0.2s, transform 0.15s; user-select: none; }
+.mapper-task:hover { border-color: var(--accent); box-shadow: var(--glow-sm); transform: translateX(2px); }
+.mapper-task.dragging { opacity: 0.4; }
+.mapper-task.mapped-ghost { opacity: 0.4; cursor: default; border-style: dashed; }
+.mapper-task.executed { border-left: 3px solid var(--green); }
+.mapper-task-header { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; }
+.mapper-task-name { font-weight: 600; font-size: 0.85rem; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mapper-task-meta { display: flex; flex-wrap: wrap; gap: 4px; }
+.mapper-task-remove { background: none; border: none; color: var(--text-dim); cursor: pointer; font-size: 1rem; padding: 0 4px; line-height: 1; transition: color 0.15s; }
+.mapper-task-remove:hover { color: var(--red); }
+
+.mapper-stage { margin-bottom: 16px; }
+.mapper-stage-header { font-family: var(--mono); font-size: 0.8rem; font-weight: 600; color: var(--text); margin-bottom: 8px; display: flex; align-items: center; gap: 8px; }
+.mapper-stage-header .stage-num { color: var(--text-dim); font-size: 0.7rem; text-transform: uppercase; }
+.mapper-drop-zone { min-height: 48px; border: 2px dashed var(--border); border-radius: var(--radius); padding: 8px; transition: border-color 0.2s, background 0.2s, box-shadow 0.2s; }
+.mapper-drop-zone.drag-over { border-color: var(--accent); background: rgba(139, 92, 246, 0.06); box-shadow: inset 0 0 16px rgba(139, 92, 246, 0.08); }
+.mapper-drop-zone-empty { display: flex; align-items: center; justify-content: center; min-height: 48px; color: var(--text-dim); font-family: var(--mono); font-size: 0.75rem; }
+
+.mapper-batch-bar {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 16px 24px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  position: sticky;
+  bottom: 16px;
+  z-index: 50;
+  box-shadow: 0 -8px 24px rgba(7, 7, 10, 0.6);
+  backdrop-filter: blur(12px);
+}
+.mapper-batch-info { font-family: var(--mono); font-size: 0.8rem; color: var(--text-muted); flex: 1; }
+.mapper-batch-info strong { color: var(--text); }
+
+.mapper-history { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); margin-top: 20px; overflow: hidden; }
+.mapper-history summary { cursor: pointer; padding: 12px 16px; font-family: var(--mono); font-size: 0.85rem; font-weight: 600; list-style: none; display: flex; align-items: center; gap: 8px; }
+.mapper-history summary::before { content: '▸'; color: var(--text-muted); font-size: 0.8rem; transition: transform 0.15s; }
+.mapper-history[open] summary::before { transform: rotate(90deg); }
+.mapper-history-list { padding: 0 16px 12px; }
+.mapper-history-item { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--border); font-family: var(--mono); font-size: 0.8rem; }
+.mapper-history-item:last-child { border-bottom: none; }
+.mapper-history-item a { color: var(--accent); }
+/* ── Responsive overrides ── */
+@media (max-width: 768px) {
+  main { padding: 16px; }
+  .task-grid { grid-template-columns: 1fr; }
+  .task-card:nth-child(7n+1) { grid-column: span 1; }
+  .config-grid { grid-template-columns: 1fr; }
+  header { padding: 0 16px; min-height: 48px; }
+  .tab-bar { padding: 0 16px; }
+  .tab-bar a { padding: 10px 14px; font-size: 0.72rem; }
+  .config-header { flex-direction: column; align-items: flex-start; }
+  .scope-toggle { margin-left: 0; }
+  .hero-title { font-size: 2.5rem !important; }
+}
+
+/* ── Selection & scrollbar ── */
+::selection { background: var(--accent2); color: white; }
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: var(--bg); }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--accent-dim); }
 </style>
 </head>
 <body>
 <header>
   <div class="brand">claude-orchestra</div>
   <nav id="breadcrumb"></nav>
+  <div class="header-actions">
+    <a href="https://github.com/jarnura/claude-orchestra" target="_blank" rel="noopener noreferrer" class="github-link" title="View on GitHub">
+      <svg viewBox="0 0 24 24" fill="currentColor">
+        <path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/>
+      </svg>
+    </a>
+  </div>
 </header>
 <nav class="tab-bar" id="tab-bar">
   <a href="#/runs">Runs</a>
   <a href="#/config">Config</a>
   <a href="#/workspace">Workspace</a>
   <a href="#/pipelines">Pipelines</a>
+  <a href="#/mapper">Pipeline Mapper</a>
 </nav>
 <main id="app">
-  <div class="loading">Loading runs...</div>
+  <div class="loading">Initializing...</div>
 </main>
 
 <script src="https://cdn.jsdelivr.net/npm/marked@14/marked.min.js"></script>
@@ -502,8 +1065,12 @@ const api = {
     const r = await fetch(`${API_BASE}/api/runs/${runId}/${taskId}/stream?summarize=1`);
     if (!r.ok) throw new Error(`Failed: ${r.status}`);
     return r.json();
-  }
-  ,
+  },
+  async getVerify(runId, taskId) {
+    const r = await fetch(`${API_BASE}/api/runs/${runId}/${taskId}/verify`);
+    if (!r.ok) throw new Error(`Failed: ${r.status}`);
+    return r.json();
+  },
   async getPipelines() {
     const r = await fetch(`${API_BASE}/api/pipelines`);
     if (!r.ok) throw new Error(`Failed: ${r.status}`);
@@ -690,6 +1257,61 @@ const api = {
     });
     if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.error || `Brainstorm stage failed: ${r.status}`); }
     return r.json();
+  },
+  // Pipeline Mapping API
+  async createMapping(tasksFileOrFiles, pipelineTemplate, customStages = null) {
+    // Support both single file (string) and array of files
+    const body = Array.isArray(tasksFileOrFiles)
+      ? { tasks_files: tasksFileOrFiles, pipeline_template: pipelineTemplate }
+      : { tasks_file: tasksFileOrFiles, pipeline_template: pipelineTemplate };
+    if (customStages && customStages.length > 0) body.custom_stages = customStages;
+    const r = await fetch(`${API_BASE}/api/pipeline-mapping/create`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+    if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.error || `Create mapping failed: ${r.status}`); }
+    return r.json();
+  },
+  async getMapping(mappingId) {
+    const r = await fetch(`${API_BASE}/api/pipeline-mapping/${encodeURIComponent(mappingId)}`);
+    if (!r.ok) throw new Error(`Failed: ${r.status}`);
+    return r.json();
+  },
+  async assignTask(mappingId, taskId, stageIndex) {
+    const r = await fetch(`${API_BASE}/api/pipeline-mapping/${encodeURIComponent(mappingId)}/assign`, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ task_id: taskId, stage_index: stageIndex })
+    });
+    if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.error || `Assign failed: ${r.status}`); }
+    return r.json();
+  },
+  async unassignTask(mappingId, taskId) {
+    const r = await fetch(`${API_BASE}/api/pipeline-mapping/${encodeURIComponent(mappingId)}/assign/${encodeURIComponent(taskId)}`, { method: 'DELETE' });
+    if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.error || `Unassign failed: ${r.status}`); }
+    return r.json();
+  },
+  async executeMapping(mappingId, taskIds) {
+    const r = await fetch(`${API_BASE}/api/pipeline-mapping/${encodeURIComponent(mappingId)}/execute`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ task_ids: taskIds })
+    });
+    if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.error || `Execute failed: ${r.status}`); }
+    return r.json();
+  },
+  async getMappingHistory(mappingId) {
+    const r = await fetch(`${API_BASE}/api/pipeline-mapping/${encodeURIComponent(mappingId)}/history`);
+    if (!r.ok) throw new Error(`Failed: ${r.status}`);
+    return r.json();
+  },
+  async brainstormToMapping(repoPath, useCase, pipelineTemplate, model = 'sonnet', customStages = null) {
+    const body = { repo_path: repoPath, use_case: useCase, pipeline_template: pipelineTemplate, model };
+    if (customStages && customStages.length > 0) body.custom_stages = customStages;
+    const r = await fetch(`${API_BASE}/api/workspace/brainstorm/to-mapping`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+    if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.error || `Generate & Map failed: ${r.status}`); }
+    return r.json();
   }
 };
 
@@ -746,9 +1368,23 @@ function formatCost(n) {
   return '$' + n.toFixed(4);
 }
 
-function statusBadge(status) {
-  const cls = { done: 'badge-done', running: 'badge-running', pending: 'badge-pending', failed: 'badge-failed' };
-  return `<span class="badge ${cls[status] || 'badge-pending'}">${status || 'unknown'}</span>`;
+function statusBadge(status, attempt) {
+  const cls = { done: 'badge-done', running: 'badge-running', pending: 'badge-pending', failed: 'badge-failed', retrying: 'badge-retrying', verifying: 'badge-verifying' };
+  const label = status || 'unknown';
+  const attStr = (attempt && attempt > 1) ? ` <small>(×${attempt})</small>` : '';
+  return `<span class="badge ${cls[status] || 'badge-pending'}">${label}${attStr}</span>`;
+}
+
+function verifyBadge(verifyStatus) {
+  if (!verifyStatus || verifyStatus === 'skipped') return '';
+  const cls = { passed: 'badge-verify-passed', failed: 'badge-verify-failed' };
+  const icon = verifyStatus === 'passed' ? '✓' : '✗';
+  return `<span class="badge ${cls[verifyStatus] || 'badge-verify-skipped'}">${icon} ${verifyStatus}</span>`;
+}
+
+function attemptInfo(attempt, maxAttempts) {
+  if (!attempt || !maxAttempts || maxAttempts <= 1) return '';
+  return `<span style="font-size:0.7rem;color:var(--text-muted)">attempt ${attempt}/${maxAttempts}</span>`;
 }
 
 function modelBadge(model) {
@@ -769,6 +1405,16 @@ function severityReplace(html) {
 }
 
 // ── Breadcrumb ──
+// ── Stagger Animation Helper ──
+function applyStaggerAnimation(container, selector) {
+  if (!container) return;
+  const items = container.querySelectorAll(selector);
+  items.forEach((item, i) => {
+    item.classList.add('stagger-item');
+    item.style.animationDelay = `${(i + 1) * 60}ms`;
+  });
+}
+
 function setBreadcrumb(...parts) {
   const bc = $('#breadcrumb');
   bc.innerHTML = '';
@@ -842,7 +1488,8 @@ function updateActiveTab() {
     const href = tab.getAttribute('href');
     const isActive = hash === href
       || (href === '#/runs' && (hash === '#/' || hash === '#' || hash.startsWith('#/run/')))
-      || (href === '#/pipelines' && hash.startsWith('#/pipeline/'));
+      || (href === '#/pipelines' && hash.startsWith('#/pipeline/'))
+      || (href === '#/mapper' && hash.startsWith('#/mapper'));
     tab.classList.toggle('active', isActive);
   });
 }
@@ -860,6 +1507,12 @@ function route() {
     selectedTrainStage = null;
   }
 
+  // Clean up mapper SSE when navigating away
+  if (mapperEventSource && !hash.startsWith('#/mapper')) {
+    mapperEventSource.close();
+    mapperEventSource = null;
+  }
+
   // Stop active-runs polling when leaving workspace
   if (hash !== '#/workspace' && wsState.activeRunsInterval) {
     wsStopActiveRunsPolling();
@@ -874,6 +1527,8 @@ function route() {
     renderWorkspaceScreen();
   } else if (hash === '#/pipelines') {
     renderPipelinesScreen();
+  } else if (hash === '#/mapper') {
+    renderMapperScreen();
   } else if (m = hash.match(/^#\/run\/([^/]+)$/)) {
     renderRunDetail(m[1]);
   } else if (m = hash.match(/^#\/run\/([^/]+)\/([^/]+)\/output$/)) {
@@ -934,14 +1589,20 @@ async function renderSessionList() {
     ).join('');
 
     let html = pipelineHtml + `
-      <div class="runs-filter">
+      <div style="margin-bottom:32px;animation:stagger-in 0.5s ease-out">
+        <h1 class="hero-title" style="font-family:var(--display);font-size:3.5rem;font-weight:700;letter-spacing:-0.04em;line-height:1;color:var(--text);margin-bottom:4px">
+          <span style="color:var(--accent)">RUN</span><span style="color:var(--text-dim)">//</span>LOG
+        </h1>
+        <p style="font-family:var(--mono);font-size:0.78rem;color:var(--text-dim);letter-spacing:0.06em;text-transform:uppercase">${runs.length} orchestration${runs.length !== 1 ? 's' : ''} recorded</p>
+      </div>
+      <div class="runs-filter" style="animation:stagger-in 0.5s ease-out;animation-delay:120ms;animation-fill-mode:both">
         <label>Filter by repo:</label>
         <select id="runs-repo-filter" onchange="filterRuns()">
           <option value="">All repos</option>
           ${repoOptions}
         </select>
       </div>
-      <input type="text" class="search-box" placeholder="Search runs by task name..." id="search">`;
+      <input type="text" class="search-box" placeholder="Search runs by task name..." id="search" style="animation:stagger-in 0.5s ease-out;animation-delay:180ms;animation-fill-mode:both">`;
     html += `<table class="runs-table"><thead><tr>
       <th>Run</th><th>Status</th><th>Tasks</th><th>ECC</th><th>Output</th><th>Cost</th>
     </tr></thead><tbody id="runs-body">`;
@@ -959,10 +1620,12 @@ async function renderSessionList() {
           <div class="status-bar">
             ${c.done ? `<div class="seg-done" style="width:${c.done/total*100}%"></div>` : ''}
             ${c.running ? `<div class="seg-running" style="width:${c.running/total*100}%"></div>` : ''}
+            ${c.retrying ? `<div class="seg-retrying" style="width:${c.retrying/total*100}%"></div>` : ''}
+            ${c.verifying ? `<div class="seg-verifying" style="width:${c.verifying/total*100}%"></div>` : ''}
             ${c.pending ? `<div class="seg-pending" style="width:${c.pending/total*100}%"></div>` : ''}
             ${c.failed ? `<div class="seg-failed" style="width:${c.failed/total*100}%"></div>` : ''}
           </div>
-          <div class="status-counts">${c.done} done${c.running ? `, ${c.running} running` : ''}${c.failed ? `, ${c.failed} failed` : ''}</div>
+          <div class="status-counts">${c.done} done${c.running ? `, ${c.running} running` : ''}${c.retrying ? `, ${c.retrying} retrying` : ''}${c.verifying ? `, ${c.verifying} verifying` : ''}${c.failed ? `, ${c.failed} failed` : ''}</div>
         </td>
         <td>${c.total}</td>
         <td><span class="ecc-badge ${run.ecc_enabled ? 'ecc-on' : 'ecc-off'}">${run.ecc_enabled ? 'ECC' : 'standalone'}</span></td>
@@ -1045,25 +1708,53 @@ async function renderRunDetail(runId) {
       const skills = t.skills ? t.skills.split(',').map(s => `<span class="tag">${s.trim()}</span>`).join('') : '';
       html += `<div class="task-card">
         <div class="task-card-header">
-          ${statusBadge(t.status)}
+          ${statusBadge(t.status, t.attempt)}
+          ${verifyBadge(t.verify_status)}
           <span class="task-card-name">${t.name}</span>
         </div>
         <div class="task-card-meta">
           ${modelBadge(t.model)}
+          ${attemptInfo(t.attempt, t.max_attempts)}
           ${agents}
           ${skills}
         </div>
-        <div class="task-card-size">output: ${formatBytes(t.output_bytes)} · stream: ${formatBytes(t.stream_bytes)}${t.cost_usd != null ? ` · cost: ${formatCost(t.cost_usd)}` : ''}</div>
+        <div class="task-card-size">output: ${formatBytes(t.output_bytes)} · stream: ${formatBytes(t.stream_bytes)}${t.cost_usd != null ? ` · cost: ${formatCost(t.cost_usd)}` : ''}${t.verify_output ? ` · verify: ${t.verify_output.substring(0, 80)}${t.verify_output.length > 80 ? '…' : ''}` : ''}</div>
         <div class="task-card-actions">
           ${t.has_output ? `<a class="btn btn-primary" href="#/run/${runId}/${t.id}/output">View Output</a>` : '<span class="btn" style="opacity:0.3">No Output</span>'}
           ${t.has_stream ? `<a class="btn" href="#/run/${runId}/${t.id}/timeline">Timeline</a>` : ''}
+          ${t.has_verify_output ? `<a class="btn" onclick="viewVerifyOutput('${runId}','${t.id}')" style="cursor:pointer">Verify</a>` : ''}
         </div>
       </div>`;
     }
     html += '</div>';
     app.innerHTML = html;
+    applyStaggerAnimation(app, '.task-card');
   } catch (e) {
     app.innerHTML = `<div class="error-banner">Error: ${e.message}</div>`;
+  }
+}
+
+async function viewVerifyOutput(runId, taskId) {
+  try {
+    const data = await api.getVerify(runId, taskId);
+    const content = data.verify_output || '(no verification output)';
+    const overlay = document.createElement('div');
+    overlay.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.7);z-index:1000;display:flex;align-items:center;justify-content:center';
+    overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
+    const panel = document.createElement('div');
+    panel.style.cssText = 'background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:24px;max-width:700px;width:90%;max-height:80vh;overflow-y:auto;font-family:var(--mono);font-size:0.85rem;white-space:pre-wrap;color:var(--text)';
+    const header = document.createElement('div');
+    header.style.cssText = 'display:flex;justify-content:space-between;align-items:center;margin-bottom:16px';
+    header.innerHTML = `<strong style="font-size:1rem">Verification Result</strong><button onclick="this.closest('div[style*=fixed]').remove()" style="background:none;border:none;color:var(--text-muted);cursor:pointer;font-size:1.2rem">&times;</button>`;
+    panel.appendChild(header);
+    const body = document.createElement('pre');
+    body.style.cssText = 'margin:0;white-space:pre-wrap;word-break:break-word';
+    body.textContent = content;
+    panel.appendChild(body);
+    overlay.appendChild(panel);
+    document.body.appendChild(overlay);
+  } catch (e) {
+    alert('Failed to load verification output: ' + e.message);
   }
 }
 
@@ -1248,6 +1939,11 @@ async function renderConfigScreen() {
   const app = $('#app');
   setBreadcrumb({ text: 'Config' });
   app.innerHTML = `
+    <div style="margin-bottom:28px;animation:stagger-in 0.5s ease-out">
+      <h1 class="hero-title" style="font-family:var(--display);font-size:2.5rem;font-weight:700;letter-spacing:-0.04em;line-height:1;color:var(--text);margin-bottom:4px">
+        <span style="color:var(--yellow)">CON</span><span style="color:var(--text-dim)">//</span>FIG
+      </h1>
+    </div>
     <div class="config-header">
       <div class="config-tabs">
         <button class="config-tab ${configState.tab === 'agents' ? 'active' : ''}" onclick="configSwitchTab('agents')">Agents</button>
@@ -1286,6 +1982,7 @@ async function configRenderTab() {
     if (configState.tab === 'agents') await configRenderAgents(content);
     else if (configState.tab === 'skills') await configRenderSkills(content);
     else if (configState.tab === 'hooks') await configRenderHooks(content);
+    applyStaggerAnimation(content, '.config-card');
   } catch (e) {
     content.innerHTML = `<div class="error-banner">Error: ${e.message}</div>`;
   }
@@ -1541,7 +2238,7 @@ function configShowEditorModal(title, name, body, scope, onSave, isNew) {
 }
 
 // ── Workspace Screen ──
-const wsState = { repos: null, selectedRepo: null, taskFiles: null, selectedFile: null, tasks: [], agents: null, skills: null, pipelineTemplates: null, pipelineDocs: null, activeRuns: [], activeRunsInterval: null, wsBrainstormMode: 'orchestra', wsProgressMessage: '', generatedTasksFile: null };
+const wsState = { repos: null, selectedRepo: null, taskFiles: null, selectedFile: null, tasks: [], agents: null, skills: null, pipelineTemplates: null, pipelineDocs: null, pipelines: [], activeRuns: [], activeRunsInterval: null, wsBrainstormMode: 'orchestra', wsProgressMessage: '', generatedTasksFile: null };
 
 async function renderWorkspaceScreen() {
   const app = $('#app');
@@ -1554,60 +2251,50 @@ async function renderWorkspaceScreen() {
       wsState.repos = data.repos || [];
     }
 
-    let html = '';
+    // ── Two-column layout: Main + Sidebar ──
+    let mainHtml = '';
+    let sidebarHtml = '';
 
-    // ── Pipeline Guide ──
-    if (!wsState.pipelineTemplates) {
-      try { wsState.pipelineTemplates = (await api.getPipelineTemplates()).templates || []; } catch (e) { wsState.pipelineTemplates = []; }
-    }
-    if (!wsState.pipelineDocs) {
-      try { wsState.pipelineDocs = (await api.getPipelineDocs()).how_to_write || ''; } catch (e) { wsState.pipelineDocs = ''; }
-    }
-    const templateOptions = wsState.pipelineTemplates.map(t =>
-      `<option value="${escapeHtml(t.name)}" title="${escapeHtml(t.description)}">${escapeHtml(t.name)} — ${escapeHtml(t.description)}</option>`
-    ).join('');
-    html += `<div class="ws-section ws-pipeline-guide">
-      <h3>Pipeline Guide</h3>
-      <details>
-        <summary>How to write pipelines</summary>
-        <div class="pipeline-docs" id="ws-pipeline-docs">${escapeHtml(wsState.pipelineDocs)}</div>
-      </details>
-      <div class="pipeline-templates">
-        <label>Quick Start:</label>
-        <select id="ws-pipeline-template">
-          <option value="">Choose a template...</option>
-          ${templateOptions}
+    // ── Main Column: Repo Selector + Task Area ──
+    mainHtml += `<div style="margin-bottom:28px;animation:stagger-in 0.5s ease-out">
+      <h1 class="hero-title" style="font-family:var(--display);font-size:2.5rem;font-weight:700;letter-spacing:-0.04em;line-height:1;color:var(--text);margin-bottom:4px">
+        <span style="color:var(--cyan)">WORK</span><span style="color:var(--text-dim)">//</span>SPACE
+      </h1>
+    </div>`;
+    mainHtml += `<div class="ws-top">
+      <div class="ws-select" style="flex:1">
+        <label>Repository</label>
+        <select id="ws-repo-select" onchange="wsSelectRepo(this.value)">
+          <option value="">— select repo —</option>
+          ${wsState.repos.map(r =>
+            `<option value="${escapeHtml(r.path)}" ${wsState.selectedRepo === r.path ? 'selected' : ''}>${escapeHtml(r.name)} (${escapeHtml(r.path)})</option>`
+          ).join('')}
         </select>
-        <button class="btn" onclick="wsUseTemplate()">Use Template</button>
       </div>
+      <button class="btn btn-primary" onclick="wsNewTask()" ${!wsState.selectedRepo ? 'disabled style="opacity:0.4"' : ''}>+ New Task</button>
     </div>`;
 
-    // ── Available Pipelines ──
-    const repoPipelines = (wsState.repoPipelines || []);
-    html += `<div class="ws-section ws-repo-pipelines">
-      <h3>Pipelines</h3>
-      ${repoPipelines.length === 0 ? '<div class="ws-empty" style="padding:12px;color:var(--text-dim)">No pipelines in this repo. Use a template above to create one.</div>' : `
-        <div class="ws-pipeline-list">
-          ${repoPipelines.map(p => `
-            <div class="ws-pipeline-item">
-              <span class="ws-pipeline-name">${escapeHtml(p.name || p.file)}</span>
-              <span class="ws-pipeline-stages">${p.stages || 0} stages</span>
-              <button class="btn btn-sm btn-success" onclick="wsRunPipeline('${escapeHtml(p.path)}')">Run</button>
-            </div>
-          `).join('')}
-        </div>
-      `}
-    </div>`;
+    // Task file tabs + task list
+    mainHtml += '<div id="ws-content">';
+    if (wsState.selectedRepo && wsState.taskFiles) {
+      mainHtml += wsRenderTaskArea();
+    } else if (wsState.selectedRepo) {
+      mainHtml += '<div class="loading">Loading tasks...</div>';
+    } else {
+      mainHtml += '<div class="ws-empty">Select a repository to view tasks</div>';
+    }
+    mainHtml += '</div>';
 
-    // ── Active Runs ──
-    html += `<div class="ws-active-runs">
+    // ── Sidebar Column: Active Runs + Brainstorm ──
+    // Active Runs
+    sidebarHtml += `<div class="ws-active-runs">
       <h3>Active Runs</h3>
       <div id="ws-active-runs">${wsRenderActiveRuns(wsState.activeRuns)}</div>
     </div>`;
 
-    // ── Brainstorm Panel ──
+    // Brainstorm Panel
     const bsMode = wsState.wsBrainstormMode || 'orchestra';
-    html += `<div class="ws-brainstorm">
+    sidebarHtml += `<div class="ws-brainstorm">
       <h3>Brainstorm</h3>
       <div class="ws-brainstorm-row" style="margin-bottom:10px">
         <label style="font-size:0.8rem;color:var(--text-muted);white-space:nowrap">Mode</label>
@@ -1632,6 +2319,17 @@ async function renderWorkspaceScreen() {
         </select>
         <button id="ws-brainstorm-btn" class="btn btn-primary" onclick="wsBrainstorm()">${wsBrainstormBtnLabel(bsMode)}</button>
       </div>
+      <div class="ws-brainstorm-row" style="margin-top:8px">
+        <select id="ws-bs-map-template" title="Pipeline template for Generate & Map" style="min-width:100px;flex:1">
+          <option value="feature">feature</option>
+          <option value="bugfix">bugfix</option>
+          <option value="audit">audit</option>
+          <option value="refactor">refactor</option>
+          <option value="release">release</option>
+          <option value="custom">custom</option>
+        </select>
+        <button class="btn" style="white-space:nowrap;border-color:var(--accent);color:var(--accent)" onclick="wsGenerateAndMap()" title="Generate tasks and open in Pipeline Mapper">Generate &amp; Map</button>
+      </div>
 
       <div class="ws-progress" id="wsBrainstormProgress">${escapeHtml(wsState.wsProgressMessage || '')}</div>
 
@@ -1648,30 +2346,11 @@ async function renderWorkspaceScreen() {
       </div>
     </div>`;
 
-    // ── Repo Selector ──
-    html += `<div class="ws-top">
-      <div class="ws-select" style="flex:1">
-        <label>Repository</label>
-        <select id="ws-repo-select" onchange="wsSelectRepo(this.value)">
-          <option value="">— select repo —</option>
-          ${wsState.repos.map(r =>
-            `<option value="${escapeHtml(r.path)}" ${wsState.selectedRepo === r.path ? 'selected' : ''}>${escapeHtml(r.name)} (${escapeHtml(r.path)})</option>`
-          ).join('')}
-        </select>
-      </div>
-      <button class="btn btn-primary" onclick="wsNewTask()" ${!wsState.selectedRepo ? 'disabled style="opacity:0.4"' : ''}>+ New Task</button>
+    // Combine into layout
+    const html = `<div class="ws-layout">
+      <div class="ws-main">${mainHtml}</div>
+      <div class="ws-sidebar">${sidebarHtml}</div>
     </div>`;
-
-    // ── Task file tabs + task list ──
-    html += '<div id="ws-content">';
-    if (wsState.selectedRepo && wsState.taskFiles) {
-      html += wsRenderTaskArea();
-    } else if (wsState.selectedRepo) {
-      html += '<div class="loading">Loading tasks...</div>';
-    } else {
-      html += '<div class="ws-empty">Select a repository to view tasks</div>';
-    }
-    html += '</div>';
 
     app.innerHTML = html;
 
@@ -1679,6 +2358,9 @@ async function renderWorkspaceScreen() {
     if (wsState.selectedRepo && !wsState.taskFiles) {
       await wsLoadRepoTasks(wsState.selectedRepo);
     }
+
+    // Apply stagger animation to task cards
+    applyStaggerAnimation(app, '.ws-task-card');
 
     // Start polling active runs
     wsStartActiveRunsPolling();
@@ -1701,7 +2383,7 @@ async function wsLoadRepoTasks(repoPath) {
   try {
     const data = await api.getRepoTasks(repoPath);
     wsState.taskFiles = data.task_files || [];
-    wsState.repoPipelines = data.pipelines || [];
+    wsState.pipelines = data.pipelines || [];
     if (wsState.taskFiles.length > 0 && !wsState.selectedFile) {
       wsState.selectedFile = wsState.taskFiles[0].path;
     }
@@ -2375,30 +3057,87 @@ async function renderPipelinesScreen() {
   app.innerHTML = '<div class="loading">Loading pipelines...</div>';
 
   try {
+    // Load pipeline templates and docs for guide
+    if (!wsState.pipelineTemplates) {
+      try { wsState.pipelineTemplates = (await api.getPipelineTemplates()).templates || []; } catch (e) { wsState.pipelineTemplates = []; }
+    }
+    if (!wsState.pipelineDocs) {
+      try { wsState.pipelineDocs = (await api.getPipelineDocs()).how_to_write || ''; } catch (e) { wsState.pipelineDocs = ''; }
+    }
+    
+    // Load historical pipelines
     if (!cache.pipelines) cache.pipelines = await api.getPipelines();
     const { pipelines } = cache.pipelines;
 
-    if (pipelines.length === 0) {
-      app.innerHTML = '<div style="color:var(--text-muted);font-family:var(--mono);padding:60px 0;text-align:center">No pipelines found</div>';
-      return;
+    // Repo pipelines
+    const repoPipelines = wsState.repoPipelines || [];
+    const selectedRepo = wsState.selectedRepo;
+
+    let html = `<div style="margin-bottom:32px;animation:stagger-in 0.5s ease-out">
+      <h1 class="hero-title" style="font-family:var(--display);font-size:3rem;font-weight:700;letter-spacing:-0.04em;line-height:1;color:var(--text);margin-bottom:4px">
+        <span style="color:var(--green)">PIPE</span><span style="color:var(--text-dim)">//</span>LINE
+      </h1>
+      <p style="font-family:var(--mono);font-size:0.78rem;color:var(--text-dim);letter-spacing:0.06em;text-transform:uppercase">Multi-stage orchestration</p>
+    </div>`;
+
+    // ── Pipeline Guide ──
+    const templateOptions = wsState.pipelineTemplates.map(t =>
+      `<option value="${escapeHtml(t.name)}" title="${escapeHtml(t.description)}">${escapeHtml(t.name)} — ${escapeHtml(t.description)}</option>`
+    ).join('');
+    html += `<div class="ws-section ws-pipeline-guide" style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:16px;margin-bottom:20px">
+      <h3 style="margin:0 0 12px 0">Pipeline Guide</h3>
+      <details>
+        <summary style="cursor:pointer;color:var(--accent)">How to write pipelines</summary>
+        <div class="pipeline-docs" id="ws-pipeline-docs" style="margin-top:12px;padding:12px;background:var(--bg);border-radius:4px;font-family:var(--mono);font-size:0.8rem;white-space:pre-wrap;overflow-x:auto">${escapeHtml(wsState.pipelineDocs)}</div>
+      </details>
+      <div class="pipeline-templates" style="margin-top:12px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <label style="font-size:0.85rem;color:var(--text-muted)">Quick Start:</label>
+        <select id="ws-pipeline-template" style="flex:1;min-width:200px;padding:8px;border-radius:4px;border:1px solid var(--border);background:var(--bg);color:var(--text)">
+          <option value="">Choose a template...</option>
+          ${templateOptions}
+        </select>
+        <button class="btn btn-primary" onclick="wsUseTemplate()">Use Template</button>
+      </div>
+    </div>`;
+
+    // ── Repo Pipelines (if repo selected) ──
+    if (selectedRepo && repoPipelines.length > 0) {
+      html += `<div class="ws-section ws-repo-pipelines" style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:16px;margin-bottom:20px">
+        <h3 style="margin:0 0 12px 0">Repo Pipelines</h3>
+        <div class="ws-pipeline-list">
+          ${repoPipelines.map(p => `
+            <div class="ws-pipeline-item" style="display:flex;align-items:center;gap:12px;padding:10px 12px;background:var(--bg);border-radius:4px;margin-bottom:8px">
+              <span class="ws-pipeline-name" style="font-family:var(--mono);font-size:0.85rem;flex:1">${escapeHtml(p.name || p.file)}</span>
+              <span class="ws-pipeline-stages" style="font-size:0.75rem;color:var(--text-muted)">${p.stages || 0} stages</span>
+              <button class="btn btn-sm btn-success" onclick="wsRunPipeline('${escapeHtml(p.path)}')">Run</button>
+            </div>
+          `).join('')}
+        </div>
+      </div>`;
     }
 
-    let html = `<table class="pipeline-list-table"><thead><tr>
-      <th>Pipeline</th><th>Stages</th><th>Status</th><th>Cost</th>
-    </tr></thead><tbody>`;
-    for (const p of pipelines) {
-      const stagePills = p.stages.map(s =>
-        `<span class="stage-pill stage-pill-${s.status}">${s.name}</span>`
-      ).join('');
-      const totalCost = p.stages.reduce((sum, s) => sum + (s.cost_usd || 0), 0);
-      html += `<tr onclick="location.hash='#/pipeline/${p.id}'">
-        <td><span style="color:var(--text)">${p.name}</span> <span style="color:var(--text-dim);font-size:0.75rem">${formatDate(p.started_at_iso)} ${formatTime(p.started_at_iso)}</span></td>
-        <td><div class="stage-pills">${stagePills}</div></td>
-        <td>${statusBadge(p.status)}</td>
-        <td>${totalCost > 0 ? formatCost(totalCost) : '—'}</td>
-      </tr>`;
+    // ── Pipeline History ──
+    if (pipelines.length === 0) {
+      html += '<div style="color:var(--text-muted);font-family:var(--mono);padding:40px 0;text-align:center">No pipeline runs found. Run a pipeline to see it here.</div>';
+    } else {
+      html += `<h3 style="margin:0 0 12px 0">Pipeline History</h3>`;
+      html += `<table class="pipeline-list-table"><thead><tr>
+        <th>Pipeline</th><th>Stages</th><th>Status</th><th>Cost</th>
+      </tr></thead><tbody>`;
+      for (const p of pipelines) {
+        const stagePills = p.stages.map(s =>
+          `<span class="stage-pill stage-pill-${s.status}">${s.name}</span>`
+        ).join('');
+        const totalCost = p.stages.reduce((sum, s) => sum + (s.cost_usd || 0), 0);
+        html += `<tr onclick="location.hash='#/pipeline/${p.id}'" style="cursor:pointer">
+          <td><span style="color:var(--text)">${p.name}</span> <span style="color:var(--text-dim);font-size:0.75rem">${formatDate(p.started_at_iso)} ${formatTime(p.started_at_iso)}</span></td>
+          <td><div class="stage-pills">${stagePills}</div></td>
+          <td>${statusBadge(p.status)}</td>
+          <td>${totalCost > 0 ? formatCost(totalCost) : '—'}</td>
+        </tr>`;
+      }
+      html += '</tbody></table>';
     }
-    html += '</tbody></table>';
     app.innerHTML = html;
   } catch (e) {
     app.innerHTML = `<div class="error-banner">Error: ${e.message}</div>`;
@@ -2666,6 +3405,684 @@ function updateTrainCarStatus(stageIdx, newStatus) {
   if (newStatus === 'done') {
     const nextConnector = document.querySelector(`.train-connector[data-connector="${stageIdx + 1}"]`);
     if (nextConnector) nextConnector.classList.add('active');
+  }
+}
+
+// ── Pipeline Mapper ──
+let mapperEventSource = null;
+const mapperState = {
+  repos: null,
+  selectedRepo: null,
+  taskFiles: null,
+  selectedTaskFiles: [],  // Changed from selectedTasksFile (single) to array
+  pipelineTemplates: null,
+  selectedTemplate: null,
+  customStagesInput: '',  // User-provided custom stages
+  mappingId: null,
+  tasks: [],
+  stages: [],
+  assignments: {},       // task_id -> stage_index
+  executedTasks: new Set(),
+  selectedBatch: new Set(),
+  history: [],
+  selectAllMapped: false,
+  loadedTaskFiles: []    // Track files loaded from generate & map
+};
+
+async function renderMapperScreen() {
+  const app = $('#app');
+  setBreadcrumb({ text: 'Pipeline Mapper' });
+  app.innerHTML = '<div class="loading">Loading mapper...</div>';
+
+  try {
+    // Load repos if needed
+    if (!mapperState.repos) {
+      const data = await api.getRepos();
+      mapperState.repos = data.repos || [];
+    }
+    // Load pipeline templates if needed
+    if (!mapperState.pipelineTemplates) {
+      try { mapperState.pipelineTemplates = (await api.getPipelineTemplates()).templates || []; } catch (_) { mapperState.pipelineTemplates = []; }
+    }
+
+    let html = '';
+
+    // ── Setup Panel ──
+    const repoOptions = mapperState.repos.map(r =>
+      `<option value="${escapeHtml(r.path)}" ${mapperState.selectedRepo === r.path ? 'selected' : ''}>${escapeHtml(r.name)} (${escapeHtml(r.path)})</option>`
+    ).join('');
+
+    const templateOptions = mapperState.pipelineTemplates.map(t =>
+      `<option value="${escapeHtml(t.name)}" ${mapperState.selectedTemplate === t.name ? 'selected' : ''}>${escapeHtml(t.name)} — ${escapeHtml(t.description || '')}</option>`
+    ).join('') + '<option value="custom" ' + (mapperState.selectedTemplate === 'custom' ? 'selected' : '') + '>custom — Define your own stages</option>';
+
+    // Build task file options, excluding already selected files
+    const availableTaskFiles = (mapperState.taskFiles || []).filter(tf => 
+      !mapperState.selectedTaskFiles.includes(tf.path)
+    );
+    const taskFileOptions = availableTaskFiles.map(tf =>
+      `<option value="${escapeHtml(tf.path)}">${escapeHtml(tf.name)} (${tf.task_counts.total} tasks)${tf.is_markdown ? ' [MD]' : ''}</option>`
+    ).join('');
+
+    // Build selected files display (removable tags)
+    const selectedFilesHtml = mapperState.selectedTaskFiles.map(fp => {
+      const tf = (mapperState.taskFiles || []).find(t => t.path === fp);
+      const name = tf ? tf.name : fp.split('/').pop();
+      const taskCount = tf ? tf.task_counts.total : '?';
+      return `<span class="mapper-file-tag">
+        ${escapeHtml(name)} <span style="color:var(--text-dim)">(${taskCount})</span>
+        <button class="mapper-file-remove" onclick="mapperRemoveTaskFile('${escapeHtml(fp)}')" title="Remove">×</button>
+      </span>`;
+    }).join('');
+
+    html += `<div style="margin-bottom:28px;animation:stagger-in 0.5s ease-out">
+      <h1 class="hero-title" style="font-family:var(--display);font-size:2.5rem;font-weight:700;letter-spacing:-0.04em;line-height:1;color:var(--text);margin-bottom:4px">
+        <span style="color:var(--orange)">MAP</span><span style="color:var(--text-dim)">//</span>PER
+      </h1>
+      <p style="font-family:var(--mono);font-size:0.78rem;color:var(--text-dim);letter-spacing:0.06em;text-transform:uppercase">Drag tasks to pipeline stages</p>
+    </div>`;
+    html += `<div class="mapper-setup">
+      <h3>Pipeline Mapper</h3>
+      <div class="mapper-setup-row">
+        <div class="mapper-setup-field">
+          <label>Repository</label>
+          <select id="mapper-repo" onchange="mapperSelectRepo(this.value)">
+            <option value="">-- select repo --</option>
+            ${repoOptions}
+          </select>
+        </div>
+        <div class="mapper-setup-field">
+          <label>Tasks Files</label>
+          <div class="mapper-tasks-files">
+            <select id="mapper-tasks-file" ${!mapperState.taskFiles || availableTaskFiles.length === 0 ? 'disabled' : ''}>
+              <option value="">-- select file to add --</option>
+              ${taskFileOptions}
+            </select>
+            <button class="btn" onclick="mapperAddTaskFile()" ${!mapperState.taskFiles || availableTaskFiles.length === 0 ? 'disabled' : ''}>Add</button>
+          </div>
+          ${selectedFilesHtml ? `<div class="mapper-selected-files">${selectedFilesHtml}</div>` : ''}
+        </div>
+        <div class="mapper-setup-field">
+          <label>Pipeline Template</label>
+          <select id="mapper-template" onchange="mapperSelectTemplate(this.value)">
+            <option value="">-- select template --</option>
+            ${templateOptions}
+          </select>
+          ${mapperState.selectedTemplate === 'custom' ? `
+            <div class="mapper-custom-stages" style="margin-top:8px">
+              <label style="font-size:0.85rem">Custom Stages (comma-separated)</label>
+              <input type="text" id="mapper-custom-stages" class="form-input" placeholder="Plan, Implement, Review" style="width:100%;margin-top:4px" value="${escapeHtml(mapperState.customStagesInput || '')}">
+            </div>
+          ` : ''}
+        </div>
+        <button class="btn btn-primary" onclick="mapperCreateMapping()" ${mapperState.selectedTaskFiles.length === 0 || !mapperState.selectedTemplate ? 'disabled style="opacity:0.4"' : ''}>Create Mapping</button>
+      </div>
+    </div>`;
+
+    // ── Mapping Area (only shown after mapping is created) ──
+    if (mapperState.mappingId && mapperState.stages.length > 0) {
+      html += mapperRenderMappingArea();
+      html += mapperRenderBatchBar();
+      html += mapperRenderHistory();
+    } else if (mapperState.mappingId) {
+      html += '<div style="color:var(--text-muted);font-family:var(--mono);padding:40px;text-align:center">No stages found in the selected template.</div>';
+    }
+
+    app.innerHTML = html;
+
+    // Attach drag-and-drop listeners after DOM is rendered
+    if (mapperState.mappingId) {
+      mapperAttachDragDrop();
+    }
+  } catch (e) {
+    app.innerHTML = `<div class="error-banner">Error: ${e.message}</div>`;
+  }
+}
+
+async function mapperSelectRepo(repoPath) {
+  mapperState.selectedRepo = repoPath || null;
+  mapperState.taskFiles = null;
+  mapperState.selectedTaskFiles = [];
+  mapperResetMapping();
+
+  if (repoPath) {
+    try {
+      const data = await api.getRepoTasks(repoPath);
+      mapperState.taskFiles = data.task_files || [];
+      
+      // Auto-select files that were loaded from generate & map
+      if (mapperState.loadedTaskFiles && mapperState.loadedTaskFiles.length > 0) {
+        mapperState.selectedTaskFiles = mapperState.loadedTaskFiles.filter(fp => 
+          mapperState.taskFiles.some(tf => tf.path === fp)
+        );
+        mapperState.loadedTaskFiles = [];  // Clear after use
+      }
+    } catch (_) {
+      mapperState.taskFiles = [];
+    }
+  }
+  renderMapperScreen();
+}
+
+function mapperAddTaskFile() {
+  const select = document.getElementById('mapper-tasks-file');
+  if (!select || !select.value) return;
+  
+  const filePath = select.value;
+  if (!mapperState.selectedTaskFiles.includes(filePath)) {
+    mapperState.selectedTaskFiles.push(filePath);
+    mapperResetMapping();
+  }
+  renderMapperScreen();
+}
+
+function mapperRemoveTaskFile(filePath) {
+  mapperState.selectedTaskFiles = mapperState.selectedTaskFiles.filter(fp => fp !== filePath);
+  mapperResetMapping();
+  renderMapperScreen();
+}
+
+function mapperSelectTasksFile(filePath) {
+  // Legacy function - now adds to the array instead of replacing
+  if (filePath && !mapperState.selectedTaskFiles.includes(filePath)) {
+    mapperState.selectedTaskFiles = [filePath];
+  } else if (!filePath) {
+    mapperState.selectedTaskFiles = [];
+  }
+  mapperResetMapping();
+  renderMapperScreen();
+}
+
+function mapperSelectTemplate(template) {
+  // Save custom stages input before changing template
+  const customStagesEl = document.getElementById('mapper-custom-stages');
+  if (customStagesEl) {
+    mapperState.customStagesInput = customStagesEl.value;
+  }
+  mapperState.selectedTemplate = template || null;
+  renderMapperScreen();  // Re-render to show/hide custom stages input
+}
+
+function mapperUpdateCreateButton() {
+  const createBtn = document.querySelector('.mapper-setup .btn-primary');
+  if (createBtn) {
+    const enabled = mapperState.selectedTaskFiles.length > 0 && mapperState.selectedTemplate;
+    createBtn.disabled = !enabled;
+    createBtn.style.opacity = enabled ? '' : '0.4';
+  }
+}
+
+function mapperResetMapping() {
+  mapperState.mappingId = null;
+  mapperState.tasks = [];
+  mapperState.stages = [];
+  mapperState.assignments = {};
+  mapperState.executedTasks = new Set();
+  mapperState.selectedBatch = new Set();
+  mapperState.history = [];
+  mapperState.selectAllMapped = false;
+  if (mapperEventSource) {
+    mapperEventSource.close();
+    mapperEventSource = null;
+  }
+}
+
+async function mapperCreateMapping() {
+  if (mapperState.selectedTaskFiles.length === 0 || !mapperState.selectedTemplate) return;
+
+  // Read template selection fresh from DOM
+  const templateEl = document.getElementById('mapper-template');
+  if (templateEl) mapperState.selectedTemplate = templateEl.value;
+  if (!mapperState.selectedTemplate) { alert('Select a pipeline template'); return; }
+
+  // Get custom stages if template is "custom"
+  let customStages = null;
+  if (mapperState.selectedTemplate === 'custom') {
+    const customStagesEl = document.getElementById('mapper-custom-stages');
+    if (customStagesEl && customStagesEl.value.trim()) {
+      customStages = customStagesEl.value.split(',').map(s => s.trim()).filter(Boolean);
+      mapperState.customStagesInput = customStagesEl.value;  // Save for re-render
+    }
+  }
+
+  try {
+    const result = await api.createMapping(mapperState.selectedTaskFiles, mapperState.selectedTemplate, customStages);
+    mapperState.mappingId = result.mapping_id;
+    mapperState.tasks = result.tasks || [];
+    mapperState.stages = result.stages || [];
+    mapperState.assignments = result.auto_assignments || {};
+    mapperState.executedTasks = new Set();
+    mapperState.selectedBatch = new Set();
+    mapperState.history = [];
+
+    // Connect SSE for live updates
+    mapperConnectSSE();
+
+    // Load history
+    mapperLoadHistory();
+
+    renderMapperScreen();
+  } catch (e) {
+    alert('Create mapping failed: ' + e.message);
+  }
+}
+
+function mapperRenderMappingArea() {
+  const assigned = mapperState.assignments;
+  const assignedTaskIds = new Set(Object.keys(assigned));
+
+  // Left column: available tasks
+  let leftCards = '';
+  for (const task of mapperState.tasks) {
+    const isMapped = assignedTaskIds.has(task.id);
+    const isExecuted = mapperState.executedTasks.has(task.id);
+    const ghostClass = isMapped ? ' mapped-ghost' : '';
+    const execClass = isExecuted ? ' executed' : '';
+    const draggable = isMapped ? '' : 'draggable="true"';
+    const mappedBadge = isMapped ? '<span class="badge badge-pending" style="font-size:0.6rem">mapped</span>' : '';
+    const unmappedBadge = (!isMapped && !isExecuted) ? '<span style="font-size:0.6rem;color:var(--text-dim)">unmapped</span>' : '';
+    const execBadge = isExecuted ? '<span class="badge badge-done" style="font-size:0.6rem">&#10003; executed</span>' : '';
+
+    leftCards += `<div class="mapper-task${ghostClass}${execClass}" ${draggable} data-task-id="${escapeHtml(task.id)}">
+      <div class="mapper-task-header">
+        <span class="mapper-task-name">${escapeHtml(task.name)}</span>
+        ${execBadge}${mappedBadge}${unmappedBadge}
+      </div>
+      <div class="mapper-task-meta">
+        ${modelBadge(task.model)}
+        ${(task.agents || '').split(',').filter(Boolean).map(a => `<span class="tag">${escapeHtml(a.trim())}</span>`).join('')}
+      </div>
+    </div>`;
+  }
+
+  const unmappedCount = mapperState.tasks.length - assignedTaskIds.size;
+
+  // Right column: pipeline stages with drop zones
+  let stageCards = '';
+  for (let i = 0; i < mapperState.stages.length; i++) {
+    const stage = mapperState.stages[i];
+    const stageName = typeof stage === 'string' ? stage : (stage.name || `Stage ${i + 1}`);
+
+    // Collect tasks assigned to this stage
+    const stageTasks = mapperState.tasks.filter(t => assigned[t.id] === i);
+
+    let stageTaskHtml = '';
+    if (stageTasks.length === 0) {
+      stageTaskHtml = '<div class="mapper-drop-zone-empty">Drop tasks here</div>';
+    } else {
+      for (const t of stageTasks) {
+        const isExecuted = mapperState.executedTasks.has(t.id);
+        const isSelected = mapperState.selectedBatch.has(t.id);
+        stageTaskHtml += `<div class="mapper-task${isExecuted ? ' executed' : ''}" data-task-id="${escapeHtml(t.id)}" style="cursor:default">
+          <div class="mapper-task-header">
+            <input type="checkbox" ${isSelected ? 'checked' : ''} onchange="mapperToggleBatchTask('${escapeHtml(t.id)}', this.checked)" style="accent-color:var(--accent)">
+            <span class="mapper-task-name">${escapeHtml(t.name)}</span>
+            ${isExecuted ? '<span class="badge badge-done" style="font-size:0.6rem">&#10003; executed</span>' : ''}
+            ${modelBadge(t.model)}
+            <button class="mapper-task-remove" onclick="mapperUnassignTask('${escapeHtml(t.id)}')" title="Unassign">&times;</button>
+          </div>
+        </div>`;
+      }
+    }
+
+    stageCards += `<div class="mapper-stage">
+      <div class="mapper-stage-header">
+        <span class="stage-num">Stage ${i + 1}</span>
+        <span>${escapeHtml(stageName)}</span>
+        <span class="count">${stageTasks.length} task${stageTasks.length !== 1 ? 's' : ''}</span>
+      </div>
+      <div class="mapper-drop-zone" data-stage-index="${i}">
+        ${stageTaskHtml}
+      </div>
+    </div>`;
+  }
+
+  const mappedCount = assignedTaskIds.size;
+
+  return `<div class="mapper-columns">
+    <div class="mapper-col">
+      <div class="mapper-col-header">Available Tasks <span class="count">${unmappedCount} unmapped / ${mapperState.tasks.length} total</span></div>
+      <div id="mapper-available-tasks">${leftCards}</div>
+    </div>
+    <div class="mapper-col">
+      <div class="mapper-col-header">Pipeline Stages <span class="count">${mappedCount} mapped</span></div>
+      <div id="mapper-stages">${stageCards}</div>
+    </div>
+  </div>`;
+}
+
+function mapperRenderBatchBar() {
+  const assigned = mapperState.assignments;
+  const mappedCount = Object.keys(assigned).length;
+  const selectedCount = mapperState.selectedBatch.size;
+
+  return `<div class="mapper-batch-bar">
+    <button class="btn" onclick="mapperSelectAllMapped()">${mapperState.selectAllMapped ? 'Deselect All' : 'Select All Mapped'}</button>
+    <div class="mapper-batch-info"><strong>${selectedCount}</strong> of <strong>${mappedCount}</strong> tasks selected for this batch</div>
+    <button class="btn" onclick="mapperClearMapping()" ${mappedCount === 0 ? 'disabled style="opacity:0.4"' : ''}>Clear Mapping</button>
+    <button class="btn btn-primary" onclick="mapperExecuteBatch()" ${selectedCount === 0 ? 'disabled style="opacity:0.4"' : ''}>Execute Batch</button>
+  </div>`;
+}
+
+function mapperRenderHistory() {
+  if (mapperState.history.length === 0) return '';
+
+  let items = '';
+  for (const batch of mapperState.history) {
+    const statusCls = batch.status === 'completed' ? 'badge-done' : batch.status === 'running' ? 'badge-running' : batch.status === 'failed' ? 'badge-failed' : 'badge-pending';
+    const taskCount = (batch.task_ids || []).length;
+    const timeStr = batch.started_at ? formatDate(batch.started_at) + ' ' + formatTime(batch.started_at) : '';
+    items += `<div class="mapper-history-item">
+      <span class="badge ${statusCls}">${batch.status || 'unknown'}</span>
+      <span style="color:var(--text-muted);font-size:0.75rem">${timeStr}</span>
+      <span style="flex:1">${taskCount} task${taskCount !== 1 ? 's' : ''}</span>
+      ${batch.run_id ? `<a href="#/run/${escapeHtml(batch.run_id)}">View Run</a>` : ''}
+      ${batch.pipeline_id ? `<a href="#/pipeline/${escapeHtml(batch.pipeline_id)}">View Pipeline</a>` : ''}
+    </div>`;
+  }
+
+  return `<details class="mapper-history" ${mapperState.history.length > 0 ? 'open' : ''}>
+    <summary>Batch History (${mapperState.history.length})</summary>
+    <div class="mapper-history-list">${items}</div>
+  </details>`;
+}
+
+// ── Drag & Drop ──
+function mapperAttachDragDrop() {
+  // Make available tasks draggable
+  document.querySelectorAll('#mapper-available-tasks .mapper-task[draggable="true"]').forEach(el => {
+    el.addEventListener('dragstart', mapperDragStart);
+    el.addEventListener('dragend', mapperDragEnd);
+  });
+
+  // Make drop zones accept drops
+  document.querySelectorAll('.mapper-drop-zone').forEach(zone => {
+    zone.addEventListener('dragover', mapperDragOver);
+    zone.addEventListener('dragleave', mapperDragLeave);
+    zone.addEventListener('drop', mapperDrop);
+  });
+}
+
+function mapperDragStart(e) {
+  const taskId = e.currentTarget.dataset.taskId;
+  e.dataTransfer.setData('text/plain', taskId);
+  e.dataTransfer.effectAllowed = 'move';
+  e.currentTarget.classList.add('dragging');
+}
+
+function mapperDragEnd(e) {
+  e.currentTarget.classList.remove('dragging');
+  // Clean up all drag-over highlights
+  document.querySelectorAll('.mapper-drop-zone.drag-over').forEach(z => z.classList.remove('drag-over'));
+}
+
+function mapperDragOver(e) {
+  e.preventDefault();
+  e.dataTransfer.dropEffect = 'move';
+  e.currentTarget.classList.add('drag-over');
+}
+
+function mapperDragLeave(e) {
+  // Only remove highlight if we truly left the drop zone
+  // relatedTarget may be null when dragging outside the window
+  if (!e.relatedTarget || !e.currentTarget.contains(e.relatedTarget)) {
+    e.currentTarget.classList.remove('drag-over');
+  }
+}
+
+async function mapperDrop(e) {
+  e.preventDefault();
+  e.currentTarget.classList.remove('drag-over');
+
+  const taskId = e.dataTransfer.getData('text/plain');
+  const stageIndex = parseInt(e.currentTarget.dataset.stageIndex, 10);
+
+  if (!taskId || isNaN(stageIndex) || !mapperState.mappingId) return;
+
+  // Validate the task exists and is not already assigned
+  const task = mapperState.tasks.find(t => t.id === taskId);
+  if (!task || mapperState.assignments.hasOwnProperty(taskId)) return;
+
+  try {
+    await api.assignTask(mapperState.mappingId, taskId, stageIndex);
+    mapperState.assignments[taskId] = stageIndex;
+    mapperRefreshDOM();
+  } catch (err) {
+    alert('Assign failed: ' + err.message);
+  }
+}
+
+async function mapperUnassignTask(taskId) {
+  if (!mapperState.mappingId) return;
+  try {
+    await api.unassignTask(mapperState.mappingId, taskId);
+    delete mapperState.assignments[taskId];
+    mapperState.selectedBatch.delete(taskId);
+    mapperRefreshDOM();
+  } catch (err) {
+    alert('Unassign failed: ' + err.message);
+  }
+}
+
+function mapperToggleBatchTask(taskId, checked) {
+  if (checked) {
+    mapperState.selectedBatch.add(taskId);
+  } else {
+    mapperState.selectedBatch.delete(taskId);
+    mapperState.selectAllMapped = false;
+  }
+  // Update batch bar (count + button states) without full re-render
+  const batchBar = document.querySelector('.mapper-batch-bar');
+  if (batchBar) {
+    const newBar = document.createElement('div');
+    newBar.innerHTML = mapperRenderBatchBar();
+    batchBar.replaceWith(newBar.firstElementChild);
+  }
+  // Sync Select All toggle state if all mapped are now selected
+  const mappedCount = Object.keys(mapperState.assignments).length;
+  if (mapperState.selectedBatch.size === mappedCount && mappedCount > 0) {
+    mapperState.selectAllMapped = true;
+  }
+}
+
+function mapperSelectAllMapped() {
+  mapperState.selectAllMapped = !mapperState.selectAllMapped;
+  if (mapperState.selectAllMapped) {
+    Object.keys(mapperState.assignments).forEach(id => mapperState.selectedBatch.add(id));
+  } else {
+    mapperState.selectedBatch.clear();
+  }
+  mapperRefreshDOM();
+}
+
+async function mapperClearMapping() {
+  if (!mapperState.mappingId) return;
+  const taskIds = Object.keys(mapperState.assignments);
+  if (taskIds.length === 0) return;
+
+  for (const taskId of taskIds) {
+    try {
+      await api.unassignTask(mapperState.mappingId, taskId);
+    } catch (_) {}
+  }
+  mapperState.assignments = {};
+  mapperState.selectedBatch.clear();
+  mapperState.selectAllMapped = false;
+  mapperRefreshDOM();
+}
+
+async function mapperExecuteBatch() {
+  if (!mapperState.mappingId || mapperState.selectedBatch.size === 0) return;
+
+  const taskIds = [...mapperState.selectedBatch];
+  try {
+    const result = await api.executeMapping(mapperState.mappingId, taskIds);
+    // Mark executed tasks
+    taskIds.forEach(id => mapperState.executedTasks.add(id));
+    mapperState.selectedBatch.clear();
+    mapperState.selectAllMapped = false;
+
+    // Refresh history
+    await mapperLoadHistory();
+    mapperRefreshDOM();
+
+    alert(`Batch started! Run ID: ${result.run_id || 'unknown'}`);
+  } catch (e) {
+    alert('Execute batch failed: ' + e.message);
+  }
+}
+
+async function mapperLoadHistory() {
+  if (!mapperState.mappingId) return;
+  try {
+    const data = await api.getMappingHistory(mapperState.mappingId);
+    mapperState.history = Array.isArray(data) ? data : (data.batches || []);
+    // Mark executed task IDs from completed batches
+    for (const batch of mapperState.history) {
+      if (batch.status === 'completed') {
+        (batch.task_ids || []).forEach(id => mapperState.executedTasks.add(id));
+      }
+    }
+  } catch (_) {
+    mapperState.history = [];
+  }
+}
+
+function mapperRefreshDOM() {
+  // Surgically update the mapping area, batch bar, and history
+  const app = $('#app');
+  if (!app || !mapperState.mappingId) return;
+
+  // Update mapping columns
+  const columnsEl = app.querySelector('.mapper-columns');
+  if (columnsEl) {
+    const newCols = document.createElement('div');
+    newCols.innerHTML = mapperRenderMappingArea();
+    columnsEl.replaceWith(newCols.firstElementChild);
+  }
+
+  // Update batch bar
+  const batchBar = app.querySelector('.mapper-batch-bar');
+  if (batchBar) {
+    const newBar = document.createElement('div');
+    newBar.innerHTML = mapperRenderBatchBar();
+    batchBar.replaceWith(newBar.firstElementChild);
+  }
+
+  // Update history
+  const historyEl = app.querySelector('.mapper-history');
+  const historyHtml = mapperRenderHistory();
+  if (historyEl && historyHtml) {
+    const newHistory = document.createElement('div');
+    newHistory.innerHTML = historyHtml;
+    historyEl.replaceWith(newHistory.firstElementChild);
+  } else if (!historyEl && historyHtml) {
+    const batchBarNew = app.querySelector('.mapper-batch-bar');
+    if (batchBarNew) {
+      batchBarNew.insertAdjacentHTML('afterend', historyHtml);
+    }
+  }
+
+  // Re-attach drag-and-drop listeners
+  mapperAttachDragDrop();
+}
+
+// ── Mapper SSE ──
+function mapperConnectSSE() {
+  if (typeof EventSource === 'undefined' || !mapperState.mappingId) return;
+  if (mapperEventSource) { mapperEventSource.close(); mapperEventSource = null; }
+
+  try {
+    mapperEventSource = new EventSource(`${API_BASE}/api/events`);
+
+    mapperEventSource.addEventListener('batch_started', function(event) {
+      try {
+        const data = JSON.parse(event.data);
+        if (data.mapping_id !== mapperState.mappingId) return;
+        mapperLoadHistory().then(() => mapperRefreshDOM());
+      } catch (_) {}
+    });
+
+    mapperEventSource.addEventListener('batch_completed', function(event) {
+      try {
+        const data = JSON.parse(event.data);
+        if (data.mapping_id !== mapperState.mappingId) return;
+        // Mark tasks as executed
+        (data.task_ids || []).forEach(id => mapperState.executedTasks.add(id));
+        mapperLoadHistory().then(() => mapperRefreshDOM());
+      } catch (_) {}
+    });
+
+    // Also listen for generic messages
+    mapperEventSource.onmessage = function(event) {
+      try {
+        const data = JSON.parse(event.data);
+        if (data.mapping_id !== mapperState.mappingId) return;
+        if (data.type === 'batch_started' || data.type === 'batch_completed') {
+          if (data.type === 'batch_completed') {
+            (data.task_ids || []).forEach(id => mapperState.executedTasks.add(id));
+          }
+          mapperLoadHistory().then(() => mapperRefreshDOM());
+        }
+      } catch (_) {}
+    };
+
+    mapperEventSource.onerror = function() {
+      if (mapperEventSource) { mapperEventSource.close(); mapperEventSource = null; }
+    };
+  } catch (_) {}
+}
+
+async function wsGenerateAndMap() {
+  const promptEl = $('#ws-brainstorm-prompt');
+  const modelEl = $('#ws-brainstorm-model');
+  const modeEl = $('#ws-brainstorm-mode');
+  const templateEl = $('#ws-bs-map-template');
+  const stagesEl = $('#ws-bs-stages');  // Custom stages input (for pipeline-custom mode)
+  if (!promptEl?.value.trim()) { alert('Enter a prompt describing what you want to build'); return; }
+  if (!wsState.selectedRepo) { alert('Select a repository first'); return; }
+  // Check mode - if pipeline-custom, use "custom" template and get stages
+  const mode = modeEl?.value || 'orchestra';
+  const pipelineTemplate = mode === 'pipeline-custom' ? 'custom' : (templateEl?.value || 'feature');
+  
+  // Get custom stages if in pipeline-custom mode
+  let customStages = null;
+  if (mode === 'pipeline-custom' && stagesEl?.value.trim()) {
+    customStages = stagesEl.value.split(',').map(s => s.trim()).filter(Boolean);
+  }
+  
+  const panel = promptEl.closest('.ws-brainstorm');
+  panel.classList.add('loading');
+  wsSetProgress('Generating tasks and creating mapping...');
+  try {
+    const result = await api.brainstormToMapping(
+      wsState.selectedRepo,
+      promptEl.value.trim(),
+      pipelineTemplate,
+      modelEl?.value || 'sonnet',
+      customStages
+    );
+    wsSetProgress('');
+    // Populate mapper state with the returned data
+    mapperState.mappingId = result.mapping_id;
+    mapperState.tasks = result.tasks || [];
+    mapperState.stages = result.stages || [];
+    mapperState.assignments = result.auto_assignments || {};
+    mapperState.executedTasks = new Set();
+    mapperState.selectedBatch = new Set();
+    mapperState.history = [];
+    mapperState.selectAllMapped = false;
+    // Track the generated tasks file
+    if (result.tasks_file) {
+      mapperState.loadedTaskFiles = [result.tasks_file];
+    }
+    // Navigate to the Pipeline Mapper tab
+    location.hash = '#/mapper';
+  } catch (e) {
+    wsSetProgress('');
+    alert('Generate & Map failed: ' + e.message);
+  } finally {
+    panel.classList.remove('loading');
   }
 }
 

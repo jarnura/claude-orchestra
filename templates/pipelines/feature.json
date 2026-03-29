@@ -1,5 +1,6 @@
 {
   "name": "Feature Implementation Pipeline",
+  "halt_on_stage_failure": true,
   "stages": [
     {
       "name": "Plan",

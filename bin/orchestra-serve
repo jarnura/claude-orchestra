@@ -43,6 +43,7 @@ RUN_ID_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_-]*$")
 TASK_ID_RE = re.compile(r"^[a-z0-9][a-z0-9_-]*$")
 PIPELINE_ID_RE = re.compile(r"^[a-z0-9][a-z0-9_-]*$")
 CONFIG_NAME_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_-]*$")
+MAPPING_ID_RE = re.compile(r"^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$")
 
 HOOK_PROFILES = {
     "strict": {
@@ -59,7 +60,10 @@ HOOK_PROFILES = {
     },
 }
 
-VALID_PIPELINE_TEMPLATES = {"feature", "bugfix", "audit", "refactor", "release"}
+VALID_PIPELINE_TEMPLATES = {"feature", "bugfix", "audit", "refactor", "release", "custom"}
+
+# CLI command for Claude Code (can be overridden via CLAUDE_CMD env var)
+CLAUDE_CMD = os.environ.get("CLAUDE_CMD", "claude")
 
 # Workspace: directories to scan for repos
 WORKSPACE_SCAN_DIRS = [
@@ -96,34 +100,90 @@ def _cache_invalidate(prefix: str):
 
 ORCHESTRA_BIN = SCRIPT_DIR / "orchestra"
 
-BRAINSTORM_SYSTEM_PROMPT = """You are a task decomposition expert. Your ONLY job is to break down user requests into parallel tasks.
+BRAINSTORM_SYSTEM_PROMPT = """You are a task decomposition expert for claude-orchestra. Your ONLY job is to break down user requests into parallel tasks with optimal agent/skill/verification configuration.
 
 CRITICAL INSTRUCTIONS:
 - DO NOT implement anything
-- DO NOT write code  
+- DO NOT write code
 - DO NOT explain what you would do
 - ONLY output task definitions in markdown format
 
 Your output MUST start immediately with "## " (task heading). No introduction, no explanation.
 
-Format each task EXACTLY like this:
+## Task Format
 
+Every metadata line is optional EXCEPT workdir and model. Only include lines that add value.
+
+```
 ## Task Name
 - workdir: {repo_path}
-- model: sonnet
-- effort: medium
+- model: opus|sonnet|haiku
+- effort: high|medium|low
+- agents: comma-separated agent names
+- skills: comma-separated skill names
+- hooks: strict|standard|minimal
+- allowedTools: Read Grep Glob Edit Write Bash Agent
+- max_retries: 0-3
+- retry_delay_seconds: 5
+- retry_backoff: fixed|exponential
+- verify: none|command|claude
+- verifyCommand: shell command to validate output
+- verifyTimeout: 60
+- verifyPrompt: criteria for claude verification
 
-Task description here. Be specific about what files to modify and what to implement.
+Detailed task prompt here.
+```
 
-Rules:
+## Available Agents (inject via agents: field)
+- planner — implementation planning, task decomposition
+- architect — system design, architectural decisions
+- tdd-guide — test-driven development, write tests first
+- code-reviewer — code quality review
+- security-reviewer — security vulnerability analysis
+- build-error-resolver — fixing build/compile errors
+- e2e-runner — end-to-end testing
+- refactor-cleaner — dead code cleanup
+- doc-updater — documentation updates
+- test-generator — generate missing tests
+- python-reviewer, typescript-reviewer, rust-reviewer, go-reviewer, java-reviewer, kotlin-reviewer, cpp-reviewer — language-specific review
+- database-reviewer — PostgreSQL/SQL review
+- docker-reviewer — Dockerfile review
+- kubernetes-reviewer — K8s manifests
+- terraform-reviewer — IaC review
+- dependency-auditor — dependency security audit
+
+## Available Skills (inject via skills: field)
+tdd-workflow, verification-loop, backend-patterns, frontend-patterns, api-design, coding-standards, python-patterns, golang-patterns, rust-patterns, kotlin-patterns, springboot-patterns, django-patterns, laravel-patterns, e2e-testing, mcp-server-patterns, python-testing, golang-testing, rust-testing, kotlin-testing, cpp-testing
+
+## Model Selection
+- opus: architecture, complex reasoning, planning, critical refactoring
+- sonnet: implementation, standard coding, code review
+- haiku: simple checks, linting, formatting, verification reviewers
+
+## Verification Strategies
+- none: output is self-evident or reviewed manually (default)
+- command: validate via shell command (tests, build, lint). Add verifyCommand.
+- claude: semantic review via haiku against criteria. Add verifyPrompt.
+
+## When to use what
+- Add agents: when task matches agent domain (security audit → security-reviewer)
+- Add skills: when task needs framework reference (Spring Boot → springboot-patterns)
+- Add verify: command when tasks modify code that has tests/build
+- Add verify: claude when output quality needs semantic judgment (docs, architecture)
+- Add max_retries: 1-2 when verification is set (gives agent a chance to fix)
+- Use hooks: strict for production/security-critical, standard for normal dev, minimal for docs
+- Use effort: high for complex tasks, medium for standard, low for simple
+
+## Rules
 - Generate 2-6 independent tasks that can run in parallel
-- Use model: opus for complex architecture, sonnet for implementation, haiku for simple checks
-- Be specific in task descriptions - mention exact files when possible
-- Each task should be self-contained and independently executable
+- Be extremely specific in prompts — name exact files, functions, endpoints
+- Each task must be self-contained and independently executable
+- Do NOT over-configure — omit optional fields when defaults are fine
+- Match agents to task type, not arbitrarily
 
 Respond ONLY with the task list in markdown format. Start immediately with ##."""
 
-BRAINSTORM_PIPELINE_SYSTEM_PROMPT = """You are a pipeline architecture expert. Your ONLY job is to design a multi-stage sequential pipeline for user requests.
+BRAINSTORM_PIPELINE_SYSTEM_PROMPT = """You are a pipeline architecture expert for claude-orchestra. Your ONLY job is to design multi-stage sequential pipelines with optimal agent/skill/verification configuration.
 
 CRITICAL INSTRUCTIONS:
 - DO NOT implement anything
@@ -134,34 +194,105 @@ CRITICAL INSTRUCTIONS:
 Output a JSON object with this EXACT structure:
 {
   "name": "Descriptive Pipeline Name",
+  "halt_on_stage_failure": true,
   "stages": [
     {
       "name": "Stage Name",
       "pass_outputs_to_next": true,
+      "max_stage_retries": 0,
       "tasks": [
         {
           "id": "task-slug-lowercase-hyphenated",
           "name": "Task Name",
-          "prompt": "Detailed task description. Mention specific files when possible.",
+          "prompt": "Detailed task description.",
           "model": "sonnet",
-          "workdir": "{repo_path}"
+          "effort": "high",
+          "workdir": "{repo_path}",
+          "agents": "agent-name",
+          "skills": "skill-name",
+          "hooks": "standard",
+          "max_retries": 1,
+          "retry_delay_seconds": 5,
+          "retry_backoff": "fixed",
+          "verify_strategy": "command",
+          "verify_command": "npm test",
+          "verify_timeout": 120,
+          "verify_prompt": "criteria for claude verification"
         }
       ]
     }
-  ]
+  ],
+  "aggregate": true
 }
 
-Rules:
-- Generate 2-4 pipeline stages that must run sequentially
+## Available Agents (use in task "agents" field)
+planner, architect, tdd-guide, code-reviewer, security-reviewer, build-error-resolver, e2e-runner, refactor-cleaner, doc-updater, test-generator, python-reviewer, typescript-reviewer, rust-reviewer, go-reviewer, java-reviewer, kotlin-reviewer, cpp-reviewer, database-reviewer, docker-reviewer, kubernetes-reviewer, terraform-reviewer, dependency-auditor
+
+## Available Skills (use in task "skills" field)
+tdd-workflow, verification-loop, backend-patterns, frontend-patterns, api-design, coding-standards, python-patterns, golang-patterns, rust-patterns, kotlin-patterns, springboot-patterns, django-patterns, laravel-patterns, e2e-testing, mcp-server-patterns
+
+## Pipeline-level fields
+- halt_on_stage_failure: true (default) stops pipeline when a stage fails. Set false for independent audits.
+- aggregate: true generates a summary report at the end.
+
+## Stage-level fields
+- pass_outputs_to_next: true injects prior stage outputs as context into next stage tasks.
+- max_stage_retries: 0 (default). If > 0, failed stages reset failed tasks and re-run.
+
+## Task-level optional fields (omit when defaults are fine)
+- agents: inject domain expertise (match agent to task type)
+- skills: inject framework reference material
+- hooks: "strict" for production/security, "standard" for normal, "minimal" for docs
+- effort: "high" for complex, "medium" for standard, "low" for simple
+- max_retries: 0-3 — retries with failure feedback injection
+- retry_delay_seconds: delay between retries (default 5)
+- retry_backoff: "fixed" or "exponential"
+- verify_strategy: "none" (default), "command" (run shell command), "claude" (semantic review via haiku)
+- verify_command: shell command for verify_strategy "command"
+- verify_timeout: timeout in seconds for verify command (default 60)
+- verify_prompt: criteria text for verify_strategy "claude"
+
+## Model Selection
+- opus: planning stages, architecture, complex reasoning
+- sonnet: implementation, standard coding, reviews
+- haiku: simple checks, linting, verification
+
+## Rules
+- Generate 2-4 pipeline stages that run sequentially
 - Each stage can have 1-5 parallel tasks
-- Use model: opus for complex architecture/planning, sonnet for implementation, haiku for simple checks
-- Set pass_outputs_to_next: true for all stages except the last one
-- task id must be lowercase letters and hyphens only (no spaces, no underscores, no numbers at start)
-- Be specific in task prompts — mention exact files when possible
-- Each task must be self-contained and executable within its stage
+- First stage: planning/analysis (opus). Middle: implementation (sonnet). Last: verification (sonnet/haiku).
+- task id: lowercase letters and hyphens only
+- Be specific in prompts — name exact files, functions, endpoints
 - workdir must always be {repo_path}
+- Add verify_strategy "command" with test/build commands for implementation stages
+- Add max_retries: 1-2 for tasks with verification
+- Only include optional fields that add value — don't over-configure
 
 Respond ONLY with the raw JSON object. No markdown, no code blocks, no explanation."""
+
+CUSTOM_STAGES_PROMPT = """You are a pipeline stage designer. Your ONLY job is to suggest appropriate pipeline stage names based on a use case.
+
+CRITICAL INSTRUCTIONS:
+- DO NOT implement anything
+- DO NOT write code
+- ONLY output a JSON array of stage names (no markdown, no prose)
+
+Output a JSON array of 2-5 stage names that represent the logical progression for the given use case.
+
+Example use cases and stages:
+- "Add authentication system" → ["Design", "Implement", "Test", "Review"]
+- "Fix performance issue in API" → ["Investigate", "Fix", "Verify"]
+- "Refactor database layer" → ["Analyze", "Plan", "Refactor", "Test"]
+- "Create CI/CD pipeline" → ["Plan", "Implement", "Configure", "Verify"]
+- "Security audit of codebase" → ["Scan", "Analyze", "Report", "Remediate"]
+
+Stage naming rules:
+- Use simple, action-oriented names (Plan, Implement, Test, Review, Deploy, etc.)
+- 2-5 stages typically
+- Stages should represent logical phases, not specific tasks
+- Names should be 1-2 words, capitalized
+
+Respond ONLY with a JSON array like: ["Stage1", "Stage2", "Stage3"]"""
 
 # ---------------------------------------------------------------------------
 # User model — file-based storage in <data_dir>/users.json
@@ -323,7 +454,7 @@ def _find_repos() -> list[dict]:
 
 
 def _find_task_files(repo_path: Path) -> list[dict]:
-    """Find tasks JSON files in a repo directory."""
+    """Find tasks JSON and MD files in a repo directory."""
     results = []
     if not repo_path.is_dir():
         return results
@@ -331,12 +462,17 @@ def _find_task_files(repo_path: Path) -> list[dict]:
     for f in sorted(repo_path.glob("*.json")):
         if _is_tasks_file(f):
             results.append(_task_file_summary(f))
+    # Check root-level MD files (tasks-*.md pattern)
+    for f in sorted(repo_path.glob("tasks*.md")):
+        results.append(_task_file_summary_md(f))
     # Check tasks/ subdirectory
     tasks_dir = repo_path / "tasks"
     if tasks_dir.is_dir():
         for f in sorted(tasks_dir.glob("*.json")):
             if _is_tasks_file(f):
                 results.append(_task_file_summary(f))
+        for f in sorted(tasks_dir.glob("*.md")):
+            results.append(_task_file_summary_md(f))
     # Check pipelines/ subdirectory for task files
     pipelines_dir = repo_path / "pipelines"
     if pipelines_dir.is_dir():
@@ -344,6 +480,21 @@ def _find_task_files(repo_path: Path) -> list[dict]:
             if _is_tasks_file(f):
                 results.append(_task_file_summary(f))
     return results
+
+
+def _task_file_summary_md(f: Path) -> dict:
+    """Summarize a tasks.md file by counting ## headings."""
+    try:
+        content = f.read_text()
+        task_count = sum(1 for line in content.splitlines() if line.startswith("## "))
+        return {
+            "path": str(f),
+            "name": f.stem,
+            "task_counts": {"total": task_count, "pending": task_count, "running": 0, "done": 0, "failed": 0},
+            "is_markdown": True,
+        }
+    except Exception:
+        return {"path": str(f), "name": f.stem, "task_counts": {"total": 0}, "is_markdown": True}
 
 
 def _is_tasks_file(f: Path) -> bool:
@@ -503,6 +654,22 @@ def _convert_tasks_md_to_json(tasks_md: str) -> dict:
         for field in ("allowedTools", "appendSystemPrompt", "agents", "skills", "hooks"):
             if field in meta:
                 task[field] = meta[field]
+        # Retry fields
+        if "max_retries" in meta:
+            task["max_retries"] = int(meta["max_retries"])
+        if "retry_delay_seconds" in meta:
+            task["retry_delay_seconds"] = int(meta["retry_delay_seconds"])
+        if "retry_backoff" in meta:
+            task["retry_backoff"] = meta["retry_backoff"]
+        # Verification fields
+        if "verify" in meta:
+            task["verify_strategy"] = meta["verify"]
+        if "verifyCommand" in meta:
+            task["verify_command"] = meta["verifyCommand"]
+        if "verifyTimeout" in meta:
+            task["verify_timeout"] = int(meta["verifyTimeout"])
+        if "verifyPrompt" in meta:
+            task["verify_prompt"] = meta["verifyPrompt"]
         tasks.append(task)
     return {"tasks": tasks}
 
@@ -539,17 +706,94 @@ def _save_tasks_file(file_path: Path, data: dict):
         raise
 
 
-def _validate_workspace_path(raw_path: str) -> Path | None:
-    """Resolve and validate a workspace file path. Returns None if unsafe."""
+# ---------------------------------------------------------------------------
+# Pipeline-mapping file helpers
+# ---------------------------------------------------------------------------
+
+_MAPPINGS_LOCK = threading.Lock()
+
+
+def _mappings_dir() -> Path:
+    """Return the data/mappings directory, creating it if needed."""
+    d = ORCHESTRA_DIR / "data" / "mappings"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def _load_mapping(mapping_id: str) -> tuple[dict | None, str | None]:
+    """Load a mapping state file. Returns (data, error_msg)."""
+    path = _mappings_dir() / f"{mapping_id}.json"
+    if not path.is_file():
+        return None, "Mapping not found"
     try:
-        p = Path(raw_path).resolve()
-    except (ValueError, OSError):
-        return None
-    # Must be under home directory
+        data = json.loads(path.read_text())
+    except (json.JSONDecodeError, ValueError):
+        return None, "Corrupt mapping file"
+    return data, None
+
+
+def _save_mapping(mapping_id: str, data: dict):
+    """Write mapping state file atomically."""
+    dest = _mappings_dir() / f"{mapping_id}.json"
+    tmp_fd, tmp_path = tempfile.mkstemp(dir=str(dest.parent), suffix=".json.tmp")
+    try:
+        with os.fdopen(tmp_fd, "w") as f:
+            json.dump(data, f, indent=2)
+            f.write("\n")
+        os.replace(tmp_path, str(dest))
+    except Exception:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+        raise
+
+
+def _validate_workspace_path(raw_path: str) -> Path:
+    """Resolve and validate a workspace file path. Raises ValueError if unsafe."""
+    try:
+        resolved = Path(raw_path).resolve()
+    except (ValueError, OSError) as exc:
+        raise ValueError(f"Cannot resolve path: {exc}") from exc
+
     home = Path.home().resolve()
-    if not str(p).startswith(str(home)):
-        return None
-    return p
+    resolved_str = str(resolved)
+    home_str = str(home)
+
+    # Must be under home directory
+    if not resolved_str.startswith(home_str):
+        raise ValueError("Path must be under the user's home directory")
+
+    # Reject sensitive directories (contains segment OR path ends at the directory)
+    sensitive_dirs = (".ssh", ".aws", ".gnupg")
+    for name in sensitive_dirs:
+        segment = f"/{name}/"
+        suffix = f"/{name}"
+        if segment in resolved_str or resolved_str.endswith(suffix):
+            raise ValueError(f"Path contains restricted segment: {name}")
+
+    config_segment = "/.config/claude-orchestra/"
+    config_suffix = "/.config/claude-orchestra"
+    if config_segment in resolved_str or resolved_str.endswith(config_suffix):
+        raise ValueError("Path contains restricted segment: .config/claude-orchestra")
+
+    if "/credentials" in resolved_str:
+        raise ValueError("Path contains restricted segment: credentials")
+
+    # Reject any dotfile directory directly under $HOME (e.g. $HOME/.anything)
+    if resolved.parent == home and resolved.name.startswith("."):
+        raise ValueError("Path must not be inside a dotfile directory under home")
+
+    # Must be inside a git repository (walk up from resolved path within home)
+    check = resolved if resolved.is_dir() else resolved.parent
+    while True:
+        if (check / ".git").exists():
+            break
+        if check == home or check == check.parent:
+            raise ValueError("Path must be inside a git repository")
+        check = check.parent
+
+    return resolved
 
 
 class SSEBroker:
@@ -688,6 +932,20 @@ class LogWatcher(threading.Thread):
                         "task_id": tid,
                         "task_name": t.get("name", tid),
                     })
+                elif status == "retrying":
+                    self._broker.broadcast("task_retrying", {
+                        "run_id": run_id,
+                        "task_id": tid,
+                        "task_name": t.get("name", tid),
+                        "attempt": t.get("attempt", 1),
+                        "max_attempts": t.get("max_attempts", 1),
+                    })
+                elif status == "verifying":
+                    self._broker.broadcast("task_verifying", {
+                        "run_id": run_id,
+                        "task_id": tid,
+                        "task_name": t.get("name", tid),
+                    })
                 elif status in ("done", "failed"):
                     self._broker.broadcast("task_completed", {
                         "run_id": run_id,
@@ -695,6 +953,9 @@ class LogWatcher(threading.Thread):
                         "task_name": t.get("name", tid),
                         "status": status,
                         "cost_usd": t.get("cost_usd"),
+                        "attempt": t.get("attempt", 1),
+                        "max_attempts": t.get("max_attempts", 1),
+                        "verify_status": t.get("verify_status", "skipped"),
                     })
 
             self._run_states[run_id] = new_states
@@ -704,11 +965,15 @@ class LogWatcher(threading.Thread):
                 done = sum(1 for s in new_states.values() if s == "done")
                 failed = sum(1 for s in new_states.values() if s == "failed")
                 running = sum(1 for s in new_states.values() if s == "running")
+                retrying = sum(1 for s in new_states.values() if s == "retrying")
+                verifying = sum(1 for s in new_states.values() if s == "verifying")
                 self._broker.broadcast("run_progress", {
                     "run_id": run_id,
                     "tasks_done": done,
                     "tasks_failed": failed,
                     "tasks_running": running,
+                    "tasks_retrying": retrying,
+                    "tasks_verifying": verifying,
                     "tasks_total": len(new_states),
                 })
 
@@ -722,10 +987,14 @@ class LogWatcher(threading.Thread):
             if all_terminal and not was_terminal:
                 done = sum(1 for s in new_states.values() if s == "done")
                 failed = sum(1 for s in new_states.values() if s == "failed")
+                tasks_retried = sum(
+                    1 for t in tasks if t.get("attempt", 1) > 1
+                )
                 self._broker.broadcast("run_completed", {
                     "run_id": run_id,
                     "tasks_done": done,
                     "tasks_failed": failed,
+                    "tasks_retried": tasks_retried,
                 })
 
             # Watch stream files for running tasks
@@ -997,6 +1266,68 @@ def _parse_stream(stream_path: Path) -> dict:
     return {"meta": meta, "events": events}
 
 
+def _auto_assign_tasks_to_stages(tasks: list[dict], stages: list[str]) -> dict[str, int]:
+    """Auto-assign tasks to stages based on content analysis.
+    
+    Returns a dict mapping task_id -> stage_index.
+    """
+    if not stages or not tasks:
+        return {}
+    
+    # Keywords for common stage types (include common variations)
+    stage_keywords = {
+        "plan": ["plan", "planning", "design", "designing", "architect", "architecting", "analyze", "analyse", "analysis", "research", "investigate", "explore", "exploration"],
+        "implement": ["implement", "implementing", "implementation", "build", "building", "create", "creating", "add", "adding", "write", "writing", "develop", "developing", "code", "coding", "fix", "fixing", "refactor", "refactoring"],
+        "review": ["review", "reviewing", "test", "testing", "tests", "verify", "verifying", "verification", "check", "checking", "audit", "auditing", "validate", "validation", "security", "quality"],
+        "audit": ["audit", "auditing", "security", "review", "check", "checking", "scan", "scanning", "vulnerability"],
+        "bugfix": ["fix", "fixing", "bug", "bugs", "patch", "patching", "resolve", "resolving", "debug", "debugging", "error", "errors"],
+        "release": ["release", "releasing", "deploy", "deploying", "deployment", "publish", "publishing", "changelog", "version", "tag", "tagging"],
+    }
+    
+    assignments = {}
+    num_stages = len(stages)
+    
+    for task in tasks:
+        task_id = task.get("id", "")
+        task_name = (task.get("name", "") + " " + task.get("prompt", "")).lower()
+        
+        # Tokenize for word-boundary matching
+        import re
+        task_words = set(re.findall(r'\b\w+\b', task_name))
+        
+        # Find best matching stage
+        best_stage = 0
+        best_score = 0
+        
+        for i, stage_name in enumerate(stages):
+            stage_lower = stage_name.lower()
+            score = 0
+            
+            # Check for exact stage name match (word boundary)
+            if stage_lower in task_words:
+                score += 10
+            
+            # Check keywords (word boundary matching)
+            keywords = stage_keywords.get(stage_lower, [])
+            for kw in keywords:
+                if kw in task_words:
+                    score += 3
+            
+            # Prefer later stages in case of ties (makes sense for pipeline flow)
+            # This ensures review/test tasks go to later stages
+            if score >= best_score:
+                best_score = score
+                best_stage = i
+        
+        # If no match found, distribute evenly across stages
+        if best_score == 0:
+            best_stage = len(assignments) % num_stages
+        
+        assignments[task_id] = best_stage
+    
+    return assignments
+
+
 class OrchestraHandler(BaseHTTPRequestHandler):
     logs_dir: Path = Path(".")
     broker: SSEBroker = None
@@ -1019,6 +1350,8 @@ class OrchestraHandler(BaseHTTPRequestHandler):
         elif m := re.match(r"^/api/runs/([^/]+)/([^/]+)/stream$", path):
             summarize = "summarize" in qs
             self._api_task_stream(m.group(1), m.group(2), summarize)
+        elif m := re.match(r"^/api/runs/([^/]+)/([^/]+)/verify$", path):
+            self._api_task_verify(m.group(1), m.group(2))
         elif path == "/api/pipelines":
             self._api_pipelines()
         elif path == "/api/pipelines/templates":
@@ -1051,12 +1384,29 @@ class OrchestraHandler(BaseHTTPRequestHandler):
             self._api_workspace_tasks_md_get()
         elif path == "/api/workspace/active-runs":
             self._api_workspace_active_runs()
+        elif m := re.match(r"^/api/pipeline-mapping/([^/]+)/history$", path):
+            self._api_mapping_history(m.group(1))
+        elif m := re.match(r"^/api/pipeline-mapping/([^/]+)$", path):
+            self._api_mapping_get(m.group(1))
         else:
             self._not_found()
 
     def do_POST(self):
         parsed = urlparse(self.path)
         path = parsed.path.rstrip("/")
+
+        # Auth endpoints are always accessible (no auth guard)
+        if path == "/api/auth/register":
+            self._api_auth_register()
+            return
+        elif path == "/api/auth/login":
+            self._api_auth_login()
+            return
+
+        # Auth guard for all other POST endpoints
+        if os.environ.get("ORCHESTRA_AUTH_ENABLED", "false").lower() == "true":
+            if self._require_auth() is None:
+                return
 
         if path == "/api/workspace/tasks":
             self._api_workspace_task_create()
@@ -1070,6 +1420,8 @@ class OrchestraHandler(BaseHTTPRequestHandler):
             self._api_workspace_brainstorm_stage()
         elif path == "/api/workspace/brainstorm/pipeline/run":
             self._api_workspace_brainstorm_pipeline_run()
+        elif path == "/api/workspace/brainstorm/to-mapping":
+            self._api_workspace_brainstorm_to_mapping()
         elif path == "/api/workspace/tasks-md/convert":
             self._api_workspace_tasks_md_convert()
         elif path == "/api/workspace/orchestra/run":
@@ -1080,12 +1432,20 @@ class OrchestraHandler(BaseHTTPRequestHandler):
             self._api_workspace_run_cancel(m.group(1))
         elif m := re.match(r"^/api/pipelines/templates/([^/]+)/create$", path):
             self._api_pipeline_template_create(m.group(1))
+        elif path == "/api/pipeline-mapping/create":
+            self._api_mapping_create()
+        elif m := re.match(r"^/api/pipeline-mapping/([^/]+)/execute$", path):
+            self._api_mapping_execute(m.group(1))
         else:
             self._not_found()
 
     def do_PUT(self):
         parsed = urlparse(self.path)
         path = parsed.path.rstrip("/")
+
+        if os.environ.get("ORCHESTRA_AUTH_ENABLED", "false").lower() == "true":
+            if self._require_auth() is None:
+                return
 
         if m := re.match(r"^/api/config/agents/([^/]+)$", path):
             self._api_config_agent_put(m.group(1))
@@ -1095,6 +1455,8 @@ class OrchestraHandler(BaseHTTPRequestHandler):
             self._api_workspace_task_update(m.group(1))
         elif path == "/api/workspace/tasks-md":
             self._api_workspace_tasks_md_put()
+        elif m := re.match(r"^/api/pipeline-mapping/([^/]+)/assign$", path):
+            self._api_mapping_assign(m.group(1))
         else:
             self._not_found()
 
@@ -1102,12 +1464,18 @@ class OrchestraHandler(BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
         path = parsed.path.rstrip("/")
 
+        if os.environ.get("ORCHESTRA_AUTH_ENABLED", "false").lower() == "true":
+            if self._require_auth() is None:
+                return
+
         if m := re.match(r"^/api/config/agents/([^/]+)$", path):
             self._api_config_agent_delete(m.group(1))
         elif m := re.match(r"^/api/config/skills/([^/]+)$", path):
             self._api_config_skill_delete(m.group(1))
         elif m := re.match(r"^/api/workspace/tasks/([^/]+)$", path):
             self._api_workspace_task_delete(m.group(1))
+        elif m := re.match(r"^/api/pipeline-mapping/([^/]+)/assign/([^/]+)$", path):
+            self._api_mapping_unassign(m.group(1), m.group(2))
         else:
             self._not_found()
 
@@ -1115,8 +1483,25 @@ class OrchestraHandler(BaseHTTPRequestHandler):
         self.send_response(204)
         self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-        self.send_header("Access-Control-Allow-Headers", "Content-Type")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization")
         self.end_headers()
+
+    def _require_auth(self):
+        """Extract and verify Bearer token from Authorization header.
+
+        Returns the decoded JWT payload dict on success, or None after
+        sending a 401 JSON error response.
+        """
+        auth_header = self.headers.get("Authorization", "")
+        if not auth_header.startswith("Bearer "):
+            self._error(401, "Missing or malformed Authorization header")
+            return None
+        token = auth_header[7:]
+        try:
+            return verify_token(token)
+        except (ValueError, RuntimeError) as exc:
+            self._error(401, str(exc))
+            return None
 
     def _validate_ids(self, run_id, task_id=None):
         if not RUN_ID_RE.match(run_id):
@@ -1166,6 +1551,8 @@ class OrchestraHandler(BaseHTTPRequestHandler):
                 "running": 0,
                 "pending": 0,
                 "failed": 0,
+                "retrying": 0,
+                "verifying": 0,
             }
             for t in tasks:
                 st = t.get("status", "pending")
@@ -1268,6 +1655,8 @@ class OrchestraHandler(BaseHTTPRequestHandler):
                 cost = _extract_cost_from_stream(stream_f)
             if cost is not None:
                 total_cost = (total_cost or 0.0) + cost
+            verify_md = run_dir / f"{tid}.verify.md"
+            verify_log = run_dir / f"{tid}.verify.log"
             tasks.append(
                 {
                     **t,
@@ -1280,6 +1669,8 @@ class OrchestraHandler(BaseHTTPRequestHandler):
                     else 0,
                     "has_output": output_f.exists() and output_f.stat().st_size > 0,
                     "has_stream": stream_f.exists() and stream_f.stat().st_size > 0,
+                    "has_verify_output": verify_md.exists() and verify_md.stat().st_size > 0,
+                    "has_verify_log": verify_log.exists() and verify_log.stat().st_size > 0,
                 }
             )
         ts = state.get("started_at", 0)
@@ -1319,6 +1710,32 @@ class OrchestraHandler(BaseHTTPRequestHandler):
             self._json(summary)
         else:
             self._serve_file(stream_f, "application/x-ndjson")
+
+    def _api_task_verify(self, run_id, task_id):
+        """GET /api/runs/<run_id>/<task_id>/verify — return verify output and log."""
+        if not self._validate_ids(run_id, task_id):
+            return
+        run_dir = self.logs_dir / run_id
+        verify_md = run_dir / f"{task_id}.verify.md"
+        verify_log = run_dir / f"{task_id}.verify.log"
+        result = {
+            "task_id": task_id,
+            "has_verify_output": verify_md.exists() and verify_md.stat().st_size > 0,
+            "has_verify_log": verify_log.exists() and verify_log.stat().st_size > 0,
+            "verify_output": "",
+            "verify_log": "",
+        }
+        if verify_md.exists():
+            try:
+                result["verify_output"] = verify_md.read_text()[:5000]
+            except Exception:
+                pass
+        if verify_log.exists():
+            try:
+                result["verify_log"] = verify_log.read_text()[:5000]
+            except Exception:
+                pass
+        self._json(result)
 
     def _api_pipelines(self):
         pipelines = []
@@ -2141,14 +2558,14 @@ CRITICAL: All tasks MUST have `workdir: {repo_path}` - the model must NOT use an
         
         try:
             result = subprocess.run(
-                ["claude", "--print", "--model", model, "--append-system-prompt", system_prompt],
+                [CLAUDE_CMD, "--print", "--model", model, "--append-system-prompt", system_prompt],
                 input=full_prompt,
                 capture_output=True,
                 text=True,
                 timeout=300,  # 5 minutes for brainstorm
             )
         except FileNotFoundError:
-            self._error(500, "claude CLI not found")
+            self._error(500, f"{CLAUDE_CMD} CLI not found. Install claude CLI or set CLAUDE_CMD env var")
             return
         except subprocess.TimeoutExpired:
             self._error(504, "Claude CLI timed out")
@@ -2236,14 +2653,14 @@ CRITICAL: All task workdir fields MUST be "{repo_path}". Generate a realistic mu
 
         try:
             result = subprocess.run(
-                ["claude", "--print", "--model", model, "--append-system-prompt", system_prompt],
+                [CLAUDE_CMD, "--print", "--model", model, "--append-system-prompt", system_prompt],
                 input=full_prompt,
                 capture_output=True,
                 text=True,
                 timeout=300,
             )
         except FileNotFoundError:
-            self._error(500, "claude CLI not found")
+            self._error(500, f"{CLAUDE_CMD} CLI not found. Install claude CLI or set CLAUDE_CMD env var")
             return
         except subprocess.TimeoutExpired:
             self._error(504, "Claude CLI timed out")
@@ -2291,31 +2708,46 @@ CRITICAL: All task workdir fields MUST be "{repo_path}". Generate a realistic mu
             inline_tasks = stage_spec.get("tasks", [])
 
             normalised = []
+            # Task fields to preserve from brainstorm output
+            _TASK_OPTIONAL_FIELDS = [
+                "effort", "agents", "skills", "hooks", "allowedTools",
+                "appendSystemPrompt", "max_retries", "retry_delay_seconds",
+                "retry_backoff", "verify_strategy", "verify_command",
+                "verify_timeout", "verify_prompt",
+            ]
             for t in inline_tasks:
                 task_id = re.sub(r"[^a-z0-9-]", "-", str(t.get("id", stage_slug)).lower()).strip("-") or f"task-{i}"
-                normalised.append({
+                task_obj = {
                     "id": task_id,
                     "name": t.get("name", task_id),
                     "prompt": t.get("prompt", ""),
                     "model": t.get("model", "sonnet"),
                     "workdir": str(repo_path),
                     "status": "pending",
-                })
+                }
+                for field in _TASK_OPTIONAL_FIELDS:
+                    if field in t and t[field] is not None:
+                        task_obj[field] = t[field]
+                normalised.append(task_obj)
             total_tasks += len(normalised)
 
             tasks_file = pipeline_dir / f"tasks-{stage_slug}.json"
             tasks_file.write_text(json.dumps({"tasks": normalised}, indent=2))
 
-            pipeline_stages.append({
+            stage_entry = {
                 "name": stage_name,
                 "tasks": [{"file": str(tasks_file), "max_parallel": max_parallel}],
                 "pass_outputs_to_next": stage_spec.get(
                     "pass_outputs_to_next", i < len(pipeline_spec["stages"]) - 1
                 ),
-            })
+            }
+            if stage_spec.get("max_stage_retries"):
+                stage_entry["max_stage_retries"] = int(stage_spec["max_stage_retries"])
+            pipeline_stages.append(stage_entry)
 
         pipeline_json = {
             "name": pipeline_name,
+            "halt_on_stage_failure": pipeline_spec.get("halt_on_stage_failure", True),
             "stages": pipeline_stages,
             "aggregate": True,
         }
@@ -2378,6 +2810,190 @@ CRITICAL: All task workdir fields MUST be "{repo_path}". Generate a realistic mu
             "task_count": total_tasks,
         })
 
+    def _api_workspace_brainstorm_to_mapping(self):
+        """POST /api/workspace/brainstorm/to-mapping
+
+        Combines brainstorm task generation with mapping session creation.
+        Accepts: { "use_case": "...", "pipeline_template": "feature", "repo_path": "/...", "custom_stages": ["Stage1", "Stage2"] }
+        Returns: { "mapping_id": "...", "tasks": [...], "stages": [...], "tasks_file": "...", "auto_assignments": {...} }
+        """
+        body = self._read_body_json()
+        if body is None:
+            return
+        use_case = body.get("use_case")
+        pipeline_template = body.get("pipeline_template", "feature")
+        custom_stages = body.get("custom_stages")  # Optional: user-provided stages for custom pipeline
+        repo_path_str = body.get("repo_path")
+        model = body.get("model", "sonnet")
+
+        if not use_case or not isinstance(use_case, str):
+            self._error(400, "Missing or invalid 'use_case' field")
+            return
+        if not repo_path_str:
+            self._error(400, "Missing 'repo_path' field")
+            return
+        if pipeline_template not in VALID_PIPELINE_TEMPLATES:
+            self._error(
+                400,
+                f"Invalid pipeline_template; must be one of: {', '.join(sorted(VALID_PIPELINE_TEMPLATES))}",
+            )
+            return
+
+        if not isinstance(model, str) or model not in ("opus", "sonnet", "haiku"):
+            model = "sonnet"
+
+        repo_path = _validate_workspace_path(repo_path_str)
+        if repo_path is None or not repo_path.is_dir():
+            self._error(400, "Invalid or non-existent repo_path")
+            return
+
+        # Step 1: Generate tasks via brainstorm (reuses same logic as _api_workspace_brainstorm)
+        system_prompt = BRAINSTORM_SYSTEM_PROMPT.replace("{repo_path}", str(repo_path))
+        repo_name = repo_path.name
+        repo_context = _get_repo_context(repo_path)
+        full_prompt = (
+            f"Target Repository: {repo_name}\n"
+            f"Repository Path: {repo_path}\n"
+            f"{repo_context}\n\n"
+            f"USER REQUEST:\n{use_case}\n\n"
+            f"CRITICAL: All tasks MUST have `workdir: {repo_path}` - "
+            f'the model must NOT use any other path. The target is "{repo_name}", '
+            "not the current working directory."
+        )
+
+        try:
+            result = subprocess.run(
+                [CLAUDE_CMD, "--print", "--model", model, "--append-system-prompt", system_prompt],
+                input=full_prompt,
+                capture_output=True,
+                text=True,
+                timeout=300,
+            )
+        except FileNotFoundError:
+            self._error(500, f"{CLAUDE_CMD} CLI not found. Install claude CLI or set CLAUDE_CMD env var")
+            return
+        except subprocess.TimeoutExpired:
+            self._error(504, "Claude CLI timed out")
+            return
+
+        if result.returncode != 0:
+            self._error(500, f"Claude CLI error: {result.stderr.strip()[:200]}")
+            return
+
+        tasks_md = result.stdout.strip()
+        if not tasks_md:
+            self._error(500, "Claude returned empty output")
+            return
+
+        # Step 2: Convert markdown to JSON and save to data/brainstorm-<timestamp>.json
+        tasks_data = _convert_tasks_md_to_json(tasks_md)
+        timestamp = int(time.time())
+        data_dir = ORCHESTRA_DIR / "data"
+        data_dir.mkdir(parents=True, exist_ok=True)
+        tasks_file = data_dir / f"brainstorm-{timestamp}.json"
+        try:
+            _save_tasks_file(tasks_file, tasks_data)
+        except Exception as e:
+            self._error(500, f"Failed to save tasks file: {e}")
+            return
+
+        # Step 3: Load template stage names (or use custom / generate for custom)
+        if pipeline_template == "custom":
+            # Use provided custom stages, or generate, or fallback
+            if custom_stages and isinstance(custom_stages, list) and all(isinstance(s, str) for s in custom_stages):
+                stages = custom_stages
+            else:
+                # Generate custom stages based on use case
+                stages = self._generate_custom_stages(use_case, model)
+                if not stages:
+                    # Fallback to feature template stages if generation fails
+                    tpl_file = ORCHESTRA_DIR / "templates" / "pipelines" / "feature.json"
+                    try:
+                        template_data = json.loads(tpl_file.read_text())
+                        stages = [s["name"] for s in template_data.get("stages", [])]
+                    except Exception:
+                        stages = ["Plan", "Implement", "Review"]
+        else:
+            tpl_file = ORCHESTRA_DIR / "templates" / "pipelines" / f"{pipeline_template}.json"
+            try:
+                template_data = json.loads(tpl_file.read_text())
+            except Exception as e:
+                self._error(500, f"Failed to load pipeline template: {e}")
+                return
+            stages = [s["name"] for s in template_data.get("stages", [])]
+
+        # Step 4: Auto-assign tasks to stages based on content analysis
+        auto_assignments = _auto_assign_tasks_to_stages(tasks_data["tasks"], stages)
+
+        # Step 5: Create mapping session
+        # Build stage objects for storage
+        stage_objects = [{"index": i, "name": name} for i, name in enumerate(stages)]
+        mapping_id = str(uuid.uuid4())
+        mapping = {
+            "mapping_id": mapping_id,
+            "tasks_file": str(tasks_file),
+            "pipeline_template": pipeline_template,
+            "custom_stages": stages if pipeline_template == "custom" else [],
+            "stages": stage_objects,
+            "assignments": auto_assignments,
+            "created_at": timestamp,
+        }
+        mappings_dir = ORCHESTRA_DIR / "data" / "mappings"
+        mappings_dir.mkdir(parents=True, exist_ok=True)
+        mapping_file = mappings_dir / f"{mapping_id}.json"
+        try:
+            mapping_file.write_text(json.dumps(mapping, indent=2) + "\n")
+        except Exception as e:
+            self._error(500, f"Failed to save mapping session: {e}")
+            return
+
+        self._json({
+            "mapping_id": mapping_id,
+            "tasks": tasks_data["tasks"],
+            "stages": stage_objects,
+            "tasks_file": str(tasks_file),
+            "auto_assignments": auto_assignments,
+        })
+
+    def _generate_custom_stages(self, use_case: str, model: str = "haiku") -> list[str]:
+        """Generate custom pipeline stages based on use case.
+        
+        Returns a list of stage names, or empty list on failure.
+        """
+        full_prompt = f"USER REQUEST:\n{use_case}\n\nSuggest appropriate pipeline stage names for this use case."
+        
+        try:
+            result = subprocess.run(
+                [CLAUDE_CMD, "--print", "--model", model, "--append-system-prompt", CUSTOM_STAGES_PROMPT],
+                input=full_prompt,
+                capture_output=True,
+                text=True,
+                timeout=30,  # Quick response for stage names
+            )
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            return []
+        
+        if result.returncode != 0:
+            return []
+        
+        output = result.stdout.strip()
+        if not output:
+            return []
+        
+        # Parse JSON array of stage names
+        try:
+            # Remove any markdown code fences if present
+            if output.startswith("```"):
+                lines = output.split("\n")
+                output = "\n".join(lines[1:-1] if lines[-1].startswith("```") else lines[1:])
+            stages = json.loads(output.strip())
+            if isinstance(stages, list) and all(isinstance(s, str) for s in stages):
+                return stages
+        except (json.JSONDecodeError, ValueError):
+            pass
+        
+        return []
+
     def _brainstorm_stage_tasks(
         self, repo_path: Path, stage_name: str, prompt: str, model: str
     ) -> tuple[str | None, str | None]:
@@ -2400,7 +3016,7 @@ CRITICAL: All task workdir fields MUST be "{repo_path}". Generate a realistic mu
         )
         try:
             result = subprocess.run(
-                ["claude", "--print", "--model", model, "--append-system-prompt", system_prompt],
+                [CLAUDE_CMD, "--print", "--model", model, "--append-system-prompt", system_prompt],
                 input=full_prompt,
                 capture_output=True,
                 text=True,
@@ -2921,6 +3537,533 @@ CRITICAL: All task workdir fields MUST be "{repo_path}". Generate a realistic mu
             return
         self._json({"cancelled": True, "run_id": run_id})
 
+    # ── Pipeline-mapping endpoints ─────────────────────────────────────
+
+    def _validate_mapping_id(self, mapping_id: str) -> bool:
+        if not MAPPING_ID_RE.match(mapping_id):
+            self._error(400, "Invalid mapping ID format")
+            return False
+        return True
+
+    def _api_mapping_create(self):
+        """POST /api/pipeline-mapping/create — create a new mapping session.
+        
+        Accepts either:
+        - tasks_file: single file path (backward compatible)
+        - tasks_files: array of file paths (new, multiple files)
+        """
+        body = self._read_body_json()
+        if body is None:
+            return
+
+        # Support both single file and multiple files
+        tasks_file = body.get("tasks_file")
+        tasks_files = body.get("tasks_files")
+        pipeline_template = body.get("pipeline_template")
+        
+        # Normalize to array
+        if tasks_files:
+            file_paths = tasks_files if isinstance(tasks_files, list) else [tasks_files]
+        elif tasks_file:
+            file_paths = [tasks_file]
+        else:
+            self._error(400, "Missing 'tasks_file' or 'tasks_files' field")
+            return
+            
+        if not pipeline_template:
+            self._error(400, "Missing 'pipeline_template' field")
+            return
+
+        # Load and merge tasks from all files
+        all_tasks = []
+        loaded_files = []
+        for fp in file_paths:
+            try:
+                tasks_path = _validate_workspace_path(fp)
+            except ValueError as exc:
+                self._error(400, str(exc))
+                return
+            tasks_data, err = _load_tasks_file(tasks_path)
+            if err:
+                self._error(400, f"Tasks file error ({fp}): {err}")
+                return
+            
+            # Add source file to each task for tracking
+            for t in tasks_data.get("tasks", []):
+                task_entry = {
+                    "id": t.get("id", ""),
+                    "name": t.get("name", ""),
+                    "model": t.get("model", ""),
+                    "agents": t.get("agents", ""),
+                    "skills": t.get("skills", ""),
+                    "status": t.get("status", "pending"),
+                    "source_file": str(tasks_path),
+                }
+                all_tasks.append(task_entry)
+            loaded_files.append(str(tasks_path))
+
+        # Validate pipeline template
+        if pipeline_template not in VALID_PIPELINE_TEMPLATES:
+            self._error(400, f"Invalid pipeline_template: must be one of {', '.join(sorted(VALID_PIPELINE_TEMPLATES))}")
+            return
+
+        # Build stage list - handle custom template specially
+        custom_stages = body.get("custom_stages")  # Array of stage names for custom pipeline
+        stages = []
+        
+        if pipeline_template == "custom":
+            # Use provided custom stages or fallback to default
+            if custom_stages and isinstance(custom_stages, list):
+                stage_names = [s for s in custom_stages if isinstance(s, str)]
+            else:
+                # Fallback to feature template stages
+                stage_names = ["Plan", "Implement", "Review"]
+            for i, name in enumerate(stage_names):
+                stages.append({"index": i, "name": name})
+        else:
+            # Load stages from template file
+            template_path = ORCHESTRA_DIR / "templates" / "pipelines" / f"{pipeline_template}.json"
+            if not template_path.is_file():
+                self._error(404, f"Pipeline template not found: {pipeline_template}")
+                return
+            try:
+                pipeline_data = json.loads(template_path.read_text())
+            except (json.JSONDecodeError, ValueError):
+                self._error(500, "Corrupt pipeline template file")
+                return
+            if not isinstance(pipeline_data.get("stages"), list):
+                self._error(500, "Pipeline template missing 'stages' array")
+                return
+            for i, stage in enumerate(pipeline_data["stages"]):
+                stages.append({
+                    "index": i,
+                    "name": stage.get("name", f"Stage {i}"),
+                })
+
+        # Auto-assign tasks to stages
+        auto_assignments = _auto_assign_tasks_to_stages(all_tasks, [s["name"] for s in stages])
+
+        mapping_id = str(uuid.uuid4())
+        mapping_state = {
+            "mapping_id": mapping_id,
+            "tasks_file": loaded_files[0] if len(loaded_files) == 1 else loaded_files[0],  # Backward compat
+            "tasks_files": loaded_files,  # New field with all files
+            "pipeline_template": pipeline_template,
+            "custom_stages": [s["name"] for s in stages] if pipeline_template == "custom" else [],
+            "stages": stages,  # Store stages for easy retrieval
+            "assignments": auto_assignments,
+            "batches": [],
+        }
+
+        with _MAPPINGS_LOCK:
+            _save_mapping(mapping_id, mapping_state)
+
+        if self.broker:
+            self.broker.broadcast("mapping_created", {
+                "mapping_id": mapping_id,
+                "pipeline_template": pipeline_template,
+                "task_count": len(all_tasks),
+                "stage_count": len(stages),
+            })
+
+        self._json_status(201, {
+            "mapping_id": mapping_id,
+            "tasks": all_tasks,
+            "stages": stages,
+            "auto_assignments": auto_assignments,
+            "tasks_files": loaded_files,
+        })
+
+    def _api_mapping_get(self, mapping_id: str):
+        """GET /api/pipeline-mapping/<mapping_id> — get current mapping state."""
+        if not self._validate_mapping_id(mapping_id):
+            return
+
+        with _MAPPINGS_LOCK:
+            mapping, err = _load_mapping(mapping_id)
+        if err:
+            self._error(404, err)
+            return
+
+        # Reload tasks from file for current state
+        tasks_path = Path(mapping["tasks_file"])
+        tasks_data, terr = _load_tasks_file(tasks_path)
+        tasks = []
+        if tasks_data:
+            for t in tasks_data["tasks"]:
+                tasks.append({
+                    "id": t.get("id", ""),
+                    "name": t.get("name", ""),
+                    "model": t.get("model", ""),
+                    "agents": t.get("agents", ""),
+                    "skills": t.get("skills", ""),
+                    "status": t.get("status", "pending"),
+                })
+
+        # Reload pipeline stages - prefer stored stages for custom pipelines
+        pipeline_template = mapping.get("pipeline_template", "feature")
+        stages = mapping.get("stages", [])
+        
+        if not stages:
+            # Fallback: load from template file
+            template_path = ORCHESTRA_DIR / "templates" / "pipelines" / f"{pipeline_template}.json"
+            if template_path.is_file():
+                try:
+                    pipeline_data = json.loads(template_path.read_text())
+                    for i, stage in enumerate(pipeline_data.get("stages", [])):
+                        stages.append({
+                            "index": i,
+                            "name": stage.get("name", f"Stage {i}"),
+                        })
+                except (json.JSONDecodeError, ValueError):
+                    pass
+
+        resp = {
+            "mapping_id": mapping_id,
+            "tasks_file": mapping["tasks_file"],
+            "pipeline_template": mapping["pipeline_template"],
+            "assignments": mapping.get("assignments", {}),
+            "tasks": tasks,
+            "stages": stages,
+        }
+        if terr:
+            resp["tasks_file_error"] = terr
+
+        self._json(resp)
+
+    def _api_mapping_assign(self, mapping_id: str):
+        """PUT /api/pipeline-mapping/<mapping_id>/assign — assign task to stage."""
+        if not self._validate_mapping_id(mapping_id):
+            return
+
+        body = self._read_body_json()
+        if body is None:
+            return
+
+        task_id = body.get("task_id")
+        stage_index = body.get("stage_index")
+        if not task_id or not isinstance(task_id, str):
+            self._error(400, "Missing or invalid 'task_id'")
+            return
+        if not WORKSPACE_TASK_ID_RE.match(task_id):
+            self._error(400, "Invalid task_id format")
+            return
+        if stage_index is None or not isinstance(stage_index, int) or stage_index < 0:
+            self._error(400, "Missing or invalid 'stage_index'")
+            return
+
+        with _MAPPINGS_LOCK:
+            mapping, err = _load_mapping(mapping_id)
+            if err:
+                self._error(404, err)
+                return
+
+            # Validate task_id exists in the tasks file
+            tasks_data, terr = _load_tasks_file(Path(mapping["tasks_file"]))
+            if terr:
+                self._error(500, f"Cannot read tasks file: {terr}")
+                return
+            task_ids = {t.get("id") for t in tasks_data["tasks"]}
+            if task_id not in task_ids:
+                self._error(404, f"Task '{task_id}' not found in tasks file")
+                return
+
+            # Validate stage_index exists in template
+            # Use stored stages for custom pipelines, otherwise load from file
+            pipeline_template = mapping.get("pipeline_template", "feature")
+            if pipeline_template == "custom" and mapping.get("stages"):
+                num_stages = len(mapping["stages"])
+            else:
+                template_path = ORCHESTRA_DIR / "templates" / "pipelines" / f"{pipeline_template}.json"
+                try:
+                    pipeline_data = json.loads(template_path.read_text())
+                except Exception:
+                    self._error(500, "Cannot read pipeline template")
+                    return
+                num_stages = len(pipeline_data.get("stages", []))
+            if stage_index >= num_stages:
+                self._error(400, f"stage_index {stage_index} out of range (0-{num_stages - 1})")
+                return
+
+            # Enforce one-to-one: reject if task is already assigned
+            assignments = mapping.get("assignments", {})
+            if task_id in assignments:
+                self._error(409, f"Task '{task_id}' is already assigned to stage {assignments[task_id]}. Unassign first.")
+                return
+
+            assignments[task_id] = stage_index
+            mapping["assignments"] = assignments
+            _save_mapping(mapping_id, mapping)
+
+        if self.broker:
+            self.broker.broadcast("task_assigned", {
+                "mapping_id": mapping_id,
+                "task_id": task_id,
+                "stage_index": stage_index,
+            })
+
+        self._json({"assigned": True, "task_id": task_id, "stage_index": stage_index})
+
+    def _api_mapping_unassign(self, mapping_id: str, task_id: str):
+        """DELETE /api/pipeline-mapping/<mapping_id>/assign/<task_id> — unassign task."""
+        if not self._validate_mapping_id(mapping_id):
+            return
+        if not WORKSPACE_TASK_ID_RE.match(task_id):
+            self._error(400, "Invalid task ID format")
+            return
+
+        with _MAPPINGS_LOCK:
+            mapping, err = _load_mapping(mapping_id)
+            if err:
+                self._error(404, err)
+                return
+
+            assignments = mapping.get("assignments", {})
+            if task_id not in assignments:
+                self._error(404, f"Task '{task_id}' is not assigned to any stage")
+                return
+
+            removed_stage = assignments.pop(task_id)
+            mapping["assignments"] = assignments
+            _save_mapping(mapping_id, mapping)
+
+        if self.broker:
+            self.broker.broadcast("task_unassigned", {
+                "mapping_id": mapping_id,
+                "task_id": task_id,
+                "stage_index": removed_stage,
+            })
+
+        self._json({"unassigned": True, "task_id": task_id, "stage_index": removed_stage})
+
+    def _api_mapping_execute(self, mapping_id: str):
+        """POST /api/pipeline-mapping/<mapping_id>/execute — run mapped tasks as pipeline."""
+        if not self._validate_mapping_id(mapping_id):
+            return
+
+        body = self._read_body_json()
+        if body is None:
+            return
+
+        task_ids = body.get("task_ids")
+        if not isinstance(task_ids, list) or not task_ids:
+            self._error(400, "Missing or empty 'task_ids' array")
+            return
+        if len(task_ids) > 100:
+            self._error(400, "'task_ids' must contain at most 100 entries")
+            return
+        for tid in task_ids:
+            if not isinstance(tid, str) or not WORKSPACE_TASK_ID_RE.match(tid):
+                self._error(400, f"Invalid task_id format: {tid!r}")
+                return
+
+        # Phase 1: Read mapping state under lock (fast)
+        with _MAPPINGS_LOCK:
+            mapping, err = _load_mapping(mapping_id)
+        if err:
+            self._error(404, err)
+            return
+
+        assignments = mapping.get("assignments", {})
+
+        # Validate all requested task_ids are assigned
+        unassigned = [tid for tid in task_ids if tid not in assignments]
+        if unassigned:
+            self._error(400, f"Tasks not assigned to any stage: {', '.join(unassigned)}")
+            return
+
+        # Phase 2: Load data and generate pipeline files (no lock needed)
+        tasks_data, terr = _load_tasks_file(Path(mapping["tasks_file"]))
+        if terr:
+            self._error(500, f"Cannot read tasks file: {terr}")
+            return
+        tasks_by_id = {t["id"]: t for t in tasks_data["tasks"] if "id" in t}
+
+        # Get stages - use stored stages for custom, otherwise load from file
+        pipeline_template = mapping.get("pipeline_template", "feature")
+        if pipeline_template == "custom" and mapping.get("stages"):
+            # Use stored stages for custom pipelines (simpler format)
+            template_stages = mapping["stages"]
+            halt_on_failure = True  # Default for custom
+            aggregate = False
+        else:
+            template_path = ORCHESTRA_DIR / "templates" / "pipelines" / f"{pipeline_template}.json"
+            try:
+                pipeline_data = json.loads(template_path.read_text())
+            except Exception:
+                self._error(500, "Cannot read pipeline template")
+                return
+            template_stages = pipeline_data.get("stages", [])
+            halt_on_failure = pipeline_data.get("halt_on_stage_failure", True)
+            aggregate = pipeline_data.get("aggregate", False)
+
+        # Group selected tasks by stage_index
+        stage_tasks: dict[int, list[dict]] = {}
+        for tid in task_ids:
+            sidx = assignments[tid]
+            if sidx not in stage_tasks:
+                stage_tasks[sidx] = []
+            task_obj = tasks_by_id.get(tid)
+            if task_obj:
+                stage_tasks[sidx].append(task_obj)
+
+        # Build filtered pipeline JSON — only stages with mapped tasks
+        filtered_stages = []
+        for sidx in sorted(stage_tasks.keys()):
+            if sidx >= len(template_stages):
+                continue
+            source_stage = template_stages[sidx]
+            # Write a temporary tasks file per stage
+            stage_tasks_file = f"mapping-{mapping_id}-stage-{sidx}.json"
+            stage_tasks_data = {"tasks": stage_tasks[sidx]}
+            stage_tasks_path = self.logs_dir / stage_tasks_file
+            stage_tasks_path.write_text(json.dumps(stage_tasks_data, indent=2))
+
+            source_tasks = source_stage.get("tasks", [])
+            max_par = source_tasks[0].get("max_parallel", 3) if source_tasks else 3
+            filtered_stages.append({
+                "name": source_stage.get("name", f"Stage {sidx}"),
+                "tasks": [{"file": str(stage_tasks_path), "max_parallel": max_par}],
+                "pass_outputs_to_next": source_stage.get("pass_outputs_to_next", False),
+            })
+
+        if not filtered_stages:
+            self._error(400, "No valid stages with assigned tasks")
+            return
+
+        run_id = datetime.now().strftime("%Y-%m-%d_%H-%M-%S") + "-" + uuid.uuid4().hex[:6]
+        pipeline_id = f"mapping-{mapping_id[:8]}-{run_id}"
+        generated_pipeline = {
+            "name": f"Mapping: {pipeline_template} (batch)",
+            "halt_on_stage_failure": halt_on_failure,
+            "stages": filtered_stages,
+            "aggregate": aggregate,
+        }
+        pipeline_file = self.logs_dir / f"{pipeline_id}.json"
+        pipeline_file.write_text(json.dumps(generated_pipeline, indent=2))
+
+        # Phase 3: Spawn pipeline process
+        pipeline_bin = SCRIPT_DIR / "orchestra-pipeline"
+        if not pipeline_bin.exists():
+            self._error(500, "orchestra-pipeline binary not found")
+            return
+
+        log_dir = self.logs_dir / run_id
+        log_dir.mkdir(parents=True, exist_ok=True)
+
+        env = {**os.environ, "LOGS_BASE": str(self.logs_dir), "MAX_PARALLEL": "5"}
+        try:
+            proc = subprocess.Popen(
+                [str(pipeline_bin), str(pipeline_file)],
+                cwd=str(Path(mapping["tasks_file"]).parent),
+                env=env,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                start_new_session=True,
+            )
+        except OSError as e:
+            self._error(500, f"Failed to spawn pipeline: {e}")
+            return
+
+        # Phase 4: Record batch only after Popen succeeds (under lock)
+        batch_entry = {
+            "run_id": run_id,
+            "pipeline_id": pipeline_id,
+            "task_ids": task_ids,
+            "status": "running",
+            "started_at": datetime.now(timezone.utc).isoformat(),
+        }
+        with _MAPPINGS_LOCK:
+            mapping, _ = _load_mapping(mapping_id)
+            if mapping:
+                mapping.setdefault("batches", []).append(batch_entry)
+                _save_mapping(mapping_id, mapping)
+
+        # Write meta.json for tracking
+        meta = {
+            "repo_path": str(Path(mapping["tasks_file"]).parent),
+            "pid": proc.pid,
+            "source": "pipeline-mapping",
+            "task_name": f"Mapping: {mapping['pipeline_template']} ({len(task_ids)} tasks)",
+            "started_at": int(time.time()),
+            "pipeline_path": str(pipeline_file),
+            "mapping_id": mapping_id,
+        }
+        (log_dir / "meta.json").write_text(json.dumps(meta))
+
+        # Start a background thread to monitor batch completion
+        threading.Thread(
+            target=self._monitor_mapping_batch,
+            args=(mapping_id, run_id, proc.pid),
+            daemon=True,
+        ).start()
+
+        if self.broker:
+            self.broker.broadcast("batch_started", {
+                "mapping_id": mapping_id,
+                "run_id": run_id,
+                "pipeline_id": pipeline_id,
+                "task_ids": task_ids,
+            })
+
+        self._json_status(202, {
+            "run_id": run_id,
+            "pipeline_id": pipeline_id,
+        })
+
+    @staticmethod
+    def _monitor_mapping_batch(mapping_id: str, run_id: str, pid: int):
+        """Background thread: wait for pipeline process to exit, then update batch status."""
+        exit_code = -1
+        try:
+            _, raw_status = os.waitpid(pid, 0)
+            exit_code = os.waitstatus_to_exitcode(raw_status)
+        except ChildProcessError:
+            exit_code = -1
+        except OSError:
+            # Process already reaped or not a child — poll until gone
+            while True:
+                try:
+                    os.kill(pid, 0)
+                    time.sleep(5)
+                except OSError:
+                    break
+
+        final_status = "completed" if exit_code == 0 else "failed"
+
+        with _MAPPINGS_LOCK:
+            mapping, err = _load_mapping(mapping_id)
+            if mapping:
+                for batch in mapping.get("batches", []):
+                    if batch["run_id"] == run_id:
+                        batch["status"] = final_status
+                        batch["exit_code"] = exit_code
+                        batch["completed_at"] = datetime.now(timezone.utc).isoformat()
+                        break
+                _save_mapping(mapping_id, mapping)
+
+        # SSE event — broker is a class var so access via the handler class
+        if OrchestraHandler.broker:
+            OrchestraHandler.broker.broadcast("batch_completed", {
+                "mapping_id": mapping_id,
+                "run_id": run_id,
+                "status": final_status,
+                "exit_code": exit_code,
+            })
+
+    def _api_mapping_history(self, mapping_id: str):
+        """GET /api/pipeline-mapping/<mapping_id>/history — past batch executions."""
+        if not self._validate_mapping_id(mapping_id):
+            return
+
+        with _MAPPINGS_LOCK:
+            mapping, err = _load_mapping(mapping_id)
+        if err:
+            self._error(404, err)
+            return
+
+        self._json({"mapping_id": mapping_id, "batches": mapping.get("batches", [])})
+
     # ── Response helpers ───────────────────────────────────────────────
 
     def _json_status(self, status: int, data):
@@ -2952,6 +4095,55 @@ CRITICAL: All task workdir fields MUST be "{repo_path}". Generate a realistic mu
         self.send_header("Access-Control-Allow-Origin", "*")
         self.end_headers()
         self.wfile.write(data)
+
+    def _api_auth_register(self):
+        """POST /api/auth/register — create a new user account."""
+        body = self._read_body_json()
+        if body is None:
+            return
+        email = body.get("email", "")
+        password = body.get("password", "")
+        if not email or not password:
+            self._error(400, "Missing 'email' or 'password'")
+            return
+        try:
+            user = create_user(email, password)
+        except ValueError as exc:
+            if "already exists" in str(exc):
+                self._error(409, str(exc))
+            else:
+                self._error(400, str(exc))
+            return
+        resp = json.dumps(user).encode()
+        self.send_response(201)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(resp)))
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.end_headers()
+        self.wfile.write(resp)
+
+    def _api_auth_login(self):
+        """POST /api/auth/login — authenticate and return a JWT."""
+        body = self._read_body_json()
+        if body is None:
+            return
+        email = body.get("email", "")
+        password = body.get("password", "")
+        if not email or not password:
+            self._error(400, "Missing 'email' or 'password'")
+            return
+        user = find_user_by_email(email)
+        if user is None or not _verify_password(password, user.get("password_hash", "")):
+            self._error(401, "Invalid email or password")
+            return
+        token = generate_token(user["id"], user["email"])
+        resp = json.dumps({"token": token}).encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(resp)))
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.end_headers()
+        self.wfile.write(resp)
 
     def _not_found(self):
         body = json.dumps({"error": "Not found"}).encode()

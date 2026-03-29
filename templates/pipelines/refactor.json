@@ -1,5 +1,6 @@
 {
   "name": "Refactoring Pipeline",
+  "halt_on_stage_failure": true,
   "stages": [
     {
       "name": "Architect",
