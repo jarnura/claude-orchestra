@@ -1567,7 +1567,7 @@ def _generate_summary_sync(pipeline_id: str, logs_dir: Path) -> tuple[str | None
 
     try:
         result = subprocess.run(
-            [CLAUDE_CMD, "--print", "--model", "claude-opus-4-5", "--append-system-prompt", PIPELINE_SUMMARY_SYSTEM_PROMPT],
+            [CLAUDE_CMD, "--print", "--model", "opus", "--append-system-prompt", PIPELINE_SUMMARY_SYSTEM_PROMPT],
             input=user_prompt,
             capture_output=True,
             text=True,
