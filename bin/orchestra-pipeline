@@ -4,15 +4,24 @@ set -eo pipefail
 # claude-orchestra multi-stage pipeline runner
 # Reads a pipeline JSON config and runs stages sequentially,
 # with tasks within each stage running in parallel.
-# Enhanced: supports pass_outputs_to_next and aggregate.
+# Enhanced: supports pass_outputs_to_next, aggregate, and task filtering.
 #
-# Usage: orchestra-pipeline [--name NAME] <pipeline.json>
+# Usage: orchestra-pipeline [OPTIONS] <pipeline.json>
+#
+# Options:
+#   --name NAME              Override pipeline name for log directory
+#   --filter-tasks TASKS     Comma-separated list of task IDs to execute
+#                            (runs only specified tasks, skips others)
+#   --filter-stages STAGES   Comma-separated list of stage names to execute
+#                            (runs only specified stages, skips others)
 
 SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
 
 # Parse arguments
 PIPELINE_FILE=""
 PIPELINE_NAME_OVERRIDE=""
+FILTER_TASKS=""
+FILTER_STAGES=""
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -22,6 +31,22 @@ while [[ $# -gt 0 ]]; do
             ;;
         --name=*)
             PIPELINE_NAME_OVERRIDE="${1#--name=}"
+            shift
+            ;;
+        --filter-tasks)
+            FILTER_TASKS="$2"
+            shift 2
+            ;;
+        --filter-tasks=*)
+            FILTER_TASKS="${1#--filter-tasks=}"
+            shift
+            ;;
+        --filter-stages)
+            FILTER_STAGES="$2"
+            shift 2
+            ;;
+        --filter-stages=*)
+            FILTER_STAGES="${1#--filter-stages=}"
             shift
             ;;
         *)
@@ -34,10 +59,14 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [[ -z "$PIPELINE_FILE" ]]; then
-    echo "Usage: orchestra-pipeline [--name NAME] <pipeline.json>"
+    echo "Usage: orchestra-pipeline [OPTIONS] <pipeline.json>"
     echo ""
     echo "Options:"
-    echo "  --name NAME    Override pipeline name for log directory"
+    echo "  --name NAME              Override pipeline name for log directory"
+    echo "  --filter-tasks TASKS     Comma-separated list of task IDs to execute"
+    echo "                           (runs only specified tasks, skips others)"
+    echo "  --filter-stages STAGES   Comma-separated list of stage names to execute"
+    echo "                           (runs only specified stages, skips others)"
     echo ""
     echo "Pipeline JSON format:"
     echo '  {'
@@ -60,6 +89,25 @@ if [[ ! -f "$PIPELINE_FILE" ]]; then
 fi
 
 log() { echo "[$(date '+%H:%M:%S')] $*"; }
+
+# Build FILTER_TASK_IDS associative array for O(1) lookups
+declare -A FILTER_TASK_IDS=()
+if [[ -n "$FILTER_TASKS" ]]; then
+    IFS=',' read -ra _filter_ids <<< "$FILTER_TASKS"
+    for _id in "${_filter_ids[@]}"; do
+        _id="${_id// /}"  # trim whitespace
+        [[ -n "$_id" ]] && FILTER_TASK_IDS["$_id"]=1
+    done
+fi
+
+# Helper: check if a stage name should be included in filter
+should_run_stage() {
+    local stage_name="$1"
+    [[ -z "$FILTER_STAGES" ]] && return 0  # No filter = run all
+    # Split comma-separated list and check if stage_name is in list
+    echo ",$FILTER_STAGES," | grep -q ",$stage_name," && return 0
+    return 1
+}
 
 # Track temp files for cleanup on exit
 _PIPELINE_TMPFILES=()
@@ -251,11 +299,26 @@ PIPELINE_HALTED=false
 
 for (( s=0; s<STAGE_COUNT; s++ )); do
     STAGE_NAME=$(jq -r ".stages[$s].name" "$PIPELINE_FILE")
+
+    # Check if this stage should be run based on filters
+    if ! should_run_stage "$STAGE_NAME"; then
+        log "=== STAGE $((s+1)): $STAGE_NAME -- SKIPPED (filtered out) ==="
+        update_pipeline_stage "$s" "skipped"
+        continue
+    fi
+
     TASK_COUNT=$(jq ".stages[$s].tasks | length" "$PIPELINE_FILE")
     PASS_OUTPUTS=$(jq -r ".stages[$s].pass_outputs_to_next // false" "$PIPELINE_FILE")
     MAX_STAGE_RETRIES=$(jq -r ".stages[$s].max_stage_retries // 0" "$PIPELINE_FILE")
     stage_attempt=1
     max_stage_attempts=$((MAX_STAGE_RETRIES + 1))
+    stage_status=""
+
+    # Pre-compute filter IDs JSON once per stage (constant for the whole run)
+    FILTER_IDS_JSON="[]"
+    if [[ ${#FILTER_TASK_IDS[@]} -gt 0 ]]; then
+        FILTER_IDS_JSON=$(printf '%s\n' "${!FILTER_TASK_IDS[@]}" | jq -R . | jq -s .)
+    fi
 
     while true; do
         log "=== STAGE $((s+1)): $STAGE_NAME ($TASK_COUNT task files, attempt $stage_attempt/$max_stage_attempts) ==="
@@ -277,14 +340,33 @@ for (( s=0; s<STAGE_COUNT; s++ )); do
                 continue
             fi
 
-            # Inject prior stage outputs if available (work on a copy to avoid permanent mutation)
+            # Apply task ID filter if --filter-tasks was specified
             WORK_FILE="$FILE"
+            if [[ ${#FILTER_TASK_IDS[@]} -gt 0 ]]; then
+                FILTERED_FILE="$LOGS_BASE/filtered-stage-${s}-${t}.json"
+                _PIPELINE_TMPFILES+=("$FILTERED_FILE")
+                jq --argjson ids "$FILTER_IDS_JSON" \
+                    '.tasks = [.tasks[] | select(.id | IN($ids[]))]' \
+                    "$FILE" > "$FILTERED_FILE"
+                FILTERED_COUNT=$(jq '.tasks | length' "$FILTERED_FILE")
+                if [[ "$FILTERED_COUNT" -eq 0 ]]; then
+                    log "  (task file $FILE: 0 tasks match filter -- skipping)"
+                    continue
+                fi
+                log "  Filtered $FILE: $FILTERED_COUNT task(s) match filter -> $FILTERED_FILE"
+                WORK_FILE="$FILTERED_FILE"
+            fi
+
+            # Inject prior stage outputs if available (work on a copy to avoid permanent mutation)
             if [[ -n "$PRIOR_LOG_DIR" && "$s" -gt 0 ]]; then
                 local_pass=$(jq -r ".stages[$((s-1))].pass_outputs_to_next // false" "$PIPELINE_FILE")
                 if [[ "$local_pass" == "true" ]]; then
-                    WORK_FILE=$(mktemp --suffix=.json)
-                    _PIPELINE_TMPFILES+=("$WORK_FILE")
-                    cp "$FILE" "$WORK_FILE"
+                    if [[ "$WORK_FILE" == "$FILE" ]]; then
+                        # No filter applied yet, make a copy
+                        WORK_FILE=$(mktemp --suffix=.json)
+                        _PIPELINE_TMPFILES+=("$WORK_FILE")
+                        cp "$FILE" "$WORK_FILE"
+                    fi
                     inject_prior_outputs "$WORK_FILE" "$PRIOR_LOG_DIR"
                 fi
             fi
@@ -299,6 +381,14 @@ for (( s=0; s<STAGE_COUNT; s++ )); do
             LOG_DIR="$LOGS_BASE/${STAGE_RUN_ID}" MAX_PARALLEL="$MAX_P" "$SCRIPT_DIR/orchestra" "$WORK_FILE" &
             PIDS+=($!)
         done
+
+        # If all task files were filtered out, skip this stage entirely
+        if [[ ${#FILES[@]} -eq 0 ]]; then
+            log "Skipping stage $((s+1)) ($STAGE_NAME) (no matching tasks)"
+            update_pipeline_stage "$s" "skipped"
+            stage_status="skipped"
+            break
+        fi
 
         # Wait for all orchestrators in this stage
         wait_for_batches "STAGE $((s+1)): $STAGE_NAME" "${FILES[@]}"

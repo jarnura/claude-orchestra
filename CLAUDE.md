@@ -37,6 +37,7 @@ examples/
   tasks-with-agents.md   # Tasks with agent injection
   tasks-with-skills.md   # Tasks with skill injection
   pipeline.json          # Example multi-stage pipeline
+  pipeline-mapping.md    # Pipeline mapping workflow walkthrough
 tests/
   test-*.sh              # Test scripts
 ```
@@ -127,3 +128,40 @@ When ECC is detected (agents directory exists at `~/.claude/agents/`):
 - **Model override**: If a single agent is specified without explicit model, the agent's preferred model is used
 
 When ECC is not detected, agent/skill/hook fields are silently ignored and the tool works as a standalone orchestrator.
+
+## Pipeline Mapping
+
+Pipeline mapping enables fine-grained control over task-to-stage assignments and batch execution.
+
+### Concept
+
+**One-to-one mapping**: Each task within a pipeline stage is mapped to a specific stage slot. Instead of running all tasks in a stage at once, tasks can be assigned explicitly and executed in controlled batches via a REST API.
+
+### Batch Execution Workflow
+
+1. **Create a mapping session** — Initialize a pipeline mapping with a base pipeline JSON
+2. **Assign tasks** — Map individual tasks to specific stages (e.g., "Plan" stage, "Implement" stage, "Review" stage)
+3. **Execute batch 1** — Run first batch of assigned tasks using `--filter-tasks` flag
+4. **Execute batch 2** — Run remaining tasks in a second batch
+5. **Monitor** — Poll state.json or use the dashboard to track progress
+
+### API Endpoints (via orchestra-serve)
+
+- `POST /api/pipeline-mapping/create` — Create a new mapping session
+- `PUT /api/pipeline-mapping/{mapping_id}/assign` — Assign a task to a stage
+- `DELETE /api/pipeline-mapping/{mapping_id}/assign/{task_id}` — Unassign a task
+- `GET /api/pipeline-mapping/{mapping_id}` — Get mapping state
+- `POST /api/pipeline-mapping/{mapping_id}/execute` — Execute batch with optional task filter
+- `GET /api/pipeline-mapping/{mapping_id}/history` — Get batch execution history
+
+### Command-Line Usage
+
+```bash
+# Create a pipeline with task filtering
+orchestra-pipeline pipeline.json --filter-tasks "task1,task2,task3"
+
+# Filter by stage
+orchestra-pipeline pipeline.json --filter-stages "Plan,Implement"
+```
+
+The `--filter-tasks` flag accepts a comma-separated list of task IDs to execute, skipping all others in the pipeline. This enables batch-based workflows where a subset of tasks are executed, results reviewed, and remaining tasks executed subsequently.
