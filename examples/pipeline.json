@@ -1,0 +1,36 @@
+{
+  "name": "Example 3-Stage Pipeline",
+  "stages": [
+    {
+      "name": "Analyze",
+      "tasks": [
+        {
+          "file": "examples/tasks-with-agents.md",
+          "max_parallel": 3
+        }
+      ],
+      "pass_outputs_to_next": true
+    },
+    {
+      "name": "Fix",
+      "tasks": [
+        {
+          "file": "examples/tasks-with-skills.md",
+          "max_parallel": 2
+        }
+      ],
+      "pass_outputs_to_next": true
+    },
+    {
+      "name": "Verify",
+      "tasks": [
+        {
+          "file": "examples/tasks-hello-world.md",
+          "max_parallel": 3
+        }
+      ],
+      "pass_outputs_to_next": false
+    }
+  ],
+  "aggregate": true
+}

@@ -1,0 +1,705 @@
+#!/usr/bin/env bash
+set -eo pipefail
+
+# claude-orchestra — Parallel task orchestrator with ECC intelligence
+# Runs multiple Claude Code sessions from a tasks JSON file in parallel,
+# with optional agent/skill/hook injection from Everything-Claude-Code.
+
+SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
+BIN_DIR="$SCRIPT_DIR"
+ORCHESTRA_DIR="$(dirname "$BIN_DIR")"
+LIB_DIR="$ORCHESTRA_DIR/lib"
+
+# Load shared libraries
+source "$LIB_DIR/config.sh"
+source "$LIB_DIR/ecc-adapter.sh"
+source "$LIB_DIR/prompt-builder.sh"
+
+load_config
+
+# When using Claude Max subscription (OAuth), clear any custom API base URL
+# that might point to a proxy. Claude CLI with OAuth needs the default endpoint.
+if [[ "$(claude auth status 2>/dev/null | python3 -c 'import json,sys; print(json.load(sys.stdin).get("authMethod",""))' 2>/dev/null)" == "oauth_token" ]]; then
+    unset ANTHROPIC_BASE_URL
+    unset ANTHROPIC_API_KEY
+fi
+
+# Parse arguments: [--name NAME] [tasks_file]
+RUN_NAME="${RUN_NAME:-}"
+TASKS_FILE=""
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --name)
+            RUN_NAME="$2"
+            shift 2
+            ;;
+        --name=*)
+            RUN_NAME="${1#--name=}"
+            shift
+            ;;
+        *)
+            if [[ -z "$TASKS_FILE" ]]; then
+                TASKS_FILE="$1"
+            fi
+            shift
+            ;;
+    esac
+done
+TASKS_FILE="${TASKS_FILE:-tasks.json}"
+
+# Auto-convert .md -> .json
+if [[ "$TASKS_FILE" == *.md ]]; then
+    MD_FILE="$TASKS_FILE"
+    TASKS_FILE="${TASKS_FILE%.md}.json"
+    echo -e "\033[0;36m[orchestra]\033[0m Converting $(basename "$MD_FILE") -> $(basename "$TASKS_FILE")"
+    "$BIN_DIR/orchestra-convert" "$MD_FILE" "$TASKS_FILE"
+else
+    # Auto-convert .md -> .json if md is newer or json missing
+    MD_FILE="${TASKS_FILE%.json}.md"
+    if [[ -f "$MD_FILE" ]] && { [[ ! -f "$TASKS_FILE" ]] || [[ "$MD_FILE" -nt "$TASKS_FILE" ]]; }; then
+        echo -e "\033[0;36m[orchestra]\033[0m Converting $(basename "$MD_FILE") -> $(basename "$TASKS_FILE")"
+        "$BIN_DIR/orchestra-convert" "$MD_FILE" "$TASKS_FILE"
+    fi
+fi
+
+# Resolve LOG_DIR
+if [[ -z "$LOG_DIR" ]]; then
+    if [[ -n "$RUN_NAME" ]]; then
+        LOG_DIR="./logs/${RUN_NAME}"
+    else
+        LOG_DIR="./logs/$(date +%Y-%m-%d_%H-%M-%S)"
+    fi
+fi
+[[ "$LOG_DIR" != /* ]] && LOG_DIR="$(pwd)/${LOG_DIR#./}"
+
+# CLI command resolution
+if [[ -z "$CLAUDE_CMD" ]]; then
+    if [[ "$MODE" == "interactive" ]] && command -v happy &>/dev/null; then
+        CLAUDE_CMD="happy"
+    else
+        CLAUDE_CMD="claude"
+    fi
+fi
+
+# Colors
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+CYAN='\033[0;36m'
+MAGENTA='\033[0;35m'
+NC='\033[0m'
+
+mkdir -p "$LOG_DIR"
+
+log() { echo -e "${CYAN}[orchestra $(date +%H:%M:%S)]${NC} $*"; }
+err() { echo -e "${RED}[error]${NC} $*" >&2; }
+
+# Check dependencies
+if ! command -v "$CLAUDE_CMD" &>/dev/null; then
+    err "$CLAUDE_CMD CLI not found in PATH"
+    exit 1
+fi
+if ! command -v jq &>/dev/null; then
+    err "jq required. Install: brew install jq"
+    exit 1
+fi
+
+# Validate tasks file
+if [[ ! -f "$TASKS_FILE" ]]; then
+    err "Tasks file not found: $TASKS_FILE"
+    exit 1
+fi
+
+# Initialize ECC adapter
+ecc_init
+
+TASK_COUNT=$(jq '.tasks | length' "$TASKS_FILE")
+PENDING_TASKS=$(jq '[.tasks[] | select(.status == "pending")] | length' "$TASKS_FILE")
+
+log "Loaded ${BLUE}$TASK_COUNT${NC} tasks (${YELLOW}$PENDING_TASKS pending${NC})"
+log "Max parallel: ${BLUE}$MAX_PARALLEL${NC}"
+log "Mode: ${BLUE}$MODE${NC}"
+log "CLI: ${BLUE}$CLAUDE_CMD${NC}"
+log "Logs: ${BLUE}$LOG_DIR${NC}"
+echo ""
+
+# Write state.json for dashboard (enhanced with ECC metadata)
+write_state() {
+    local ecc_status="false"
+    ecc_available && ecc_status="true"
+
+    jq --arg logdir "$LOG_DIR" --arg start "$ORCHESTRATOR_START" \
+       --argjson ecc "$ecc_status" '{
+        log_dir: $logdir,
+        started_at: ($start | tonumber),
+        ecc_enabled: $ecc,
+        total_elapsed_seconds: ([.tasks[] | .elapsed_seconds // 0] | add // 0),
+        tasks: [.tasks[] | {
+            id: .id,
+            name: .name,
+            status: .status,
+            model: (.model // "opus"),
+            agents: (.agents // null),
+            skills: (.skills // null),
+            hooks: (.hooks // null),
+            cost_usd: (.cost_usd // null),
+            workdir: (.workdir // null),
+            started_at: (.started_at // null),
+            finished_at: (.finished_at // null),
+            elapsed_seconds: (.elapsed_seconds // null),
+            attempt: (.attempt // 1),
+            max_attempts: (.max_attempts // 1),
+            verify_status: (.verify_status // "skipped"),
+            verify_output: (.verify_output // null)
+        }]
+    }' "$TASKS_FILE" > "$LOG_DIR/state.json" 2>/dev/null || true
+}
+
+ORCHESTRATOR_START=$(date +%s)
+
+# Interactive mode: launch each task as a worktree + tmux session
+if [[ "$MODE" == "interactive" ]]; then
+    count=0
+    while IFS= read -r task_json; do
+        [[ -z "$task_json" ]] && continue
+        [[ $count -ge $MAX_PARALLEL ]] && break
+
+        id=$(echo "$task_json" | jq -r '.id')
+        name=$(echo "$task_json" | jq -r '.name')
+        prompt=$(echo "$task_json" | jq -r '.prompt')
+        workdir=$(echo "$task_json" | jq -r '.workdir // "."')
+        workdir="${workdir/#\~/$HOME}"
+        model=$(echo "$task_json" | jq -r '.model // "opus"')
+        effort=$(echo "$task_json" | jq -r '.effort // "high"')
+
+        log "Launching interactive: ${GREEN}$name${NC}"
+
+        (
+            cd "$workdir"
+            "$CLAUDE_CMD" --worktree "$id" --tmux \
+                --model "$model" --effort "$effort" \
+                --name "$name" \
+                "$prompt"
+        ) &
+
+        update_task_status "$id" "running"
+        count=$(( count + 1 ))
+        sleep 1
+    done < <(jq -c '.tasks[] | select(.status == "pending")' "$TASKS_FILE")
+
+    log "Launched $count interactive sessions. Use tmux to switch between them."
+    exit 0
+fi
+
+# Track PIDs
+declare -A PIDS               # pid -> task_id
+declare -A TASK_NAMES         # task_id -> name
+declare -A TASK_STARTS        # task_id -> start time
+declare -A TASK_ATTEMPTS      # task_id -> current attempt (1-based)
+declare -A TASK_MAX_RETRIES   # task_id -> max retries allowed
+declare -A TASK_RETRY_DELAY   # task_id -> delay seconds between retries
+declare -A TASK_RETRY_BACKOFF   # task_id -> "fixed" or "exponential"
+declare -A TASK_JSON_CACHE      # task_id -> original task json for re-launch
+declare -A TASK_VERIFY_STRATEGY # task_id -> "none", "command", or "claude"
+declare -A TASK_VERIFY_CMD      # task_id -> shell command to run for verification
+declare -A TASK_VERIFY_TIMEOUT  # task_id -> timeout in seconds for verify command
+declare -A TASK_VERIFY_PROMPT   # task_id -> criteria prompt for claude verification
+declare -A TASK_WORKDIRS        # task_id -> resolved workdir path
+
+update_task_status() {
+    local task_id="$1" new_status="$2"
+    local tmp=$(mktemp)
+    jq --arg id "$task_id" --arg s "$new_status" \
+        '(.tasks[] | select(.id == $id)).status = $s' \
+        "$TASKS_FILE" > "$tmp" && mv "$tmp" "$TASKS_FILE" || rm -f "$tmp"
+}
+
+update_task_cost() {
+    local task_id="$1" cost="$2"
+    local tmp=$(mktemp)
+    jq --arg id "$task_id" --argjson cost "$cost" \
+        '(.tasks[] | select(.id == $id)).cost_usd = $cost' \
+        "$TASKS_FILE" > "$tmp" && mv "$tmp" "$TASKS_FILE" || rm -f "$tmp"
+}
+
+update_task_started_at() {
+    local task_id="$1" started="$2"
+    local tmp=$(mktemp)
+    jq --arg id "$task_id" --argjson t "$started" \
+        '(.tasks[] | select(.id == $id)).started_at = $t' \
+        "$TASKS_FILE" > "$tmp" && mv "$tmp" "$TASKS_FILE" || rm -f "$tmp"
+}
+
+update_task_finished_at() {
+    local task_id="$1" finished="$2" elapsed="$3"
+    local tmp=$(mktemp)
+    jq --arg id "$task_id" --argjson f "$finished" --argjson e "$elapsed" \
+        '(.tasks[] | select(.id == $id)).finished_at = $f |
+         (.tasks[] | select(.id == $id)).elapsed_seconds = $e' \
+        "$TASKS_FILE" > "$tmp" && mv "$tmp" "$TASKS_FILE" || rm -f "$tmp"
+}
+
+update_task_attempt() {
+    local task_id="$1" attempt_number="$2" max_attempts="$3"
+    local tmp=$(mktemp)
+    jq --arg id "$task_id" --argjson attempt "$attempt_number" \
+       --argjson max_attempts "$max_attempts" \
+        '(.tasks[] | select(.id == $id)).attempt = $attempt |
+         (.tasks[] | select(.id == $id)).max_attempts = $max_attempts' \
+        "$TASKS_FILE" > "$tmp" && mv "$tmp" "$TASKS_FILE" || rm -f "$tmp"
+}
+
+update_task_verify_status() {
+    local task_id="$1" vstatus="$2"
+    local tmp=$(mktemp)
+    jq --arg id "$task_id" --arg vs "$vstatus" \
+        '(.tasks[] | select(.id == $id)).verify_status = $vs' \
+        "$TASKS_FILE" > "$tmp" && mv "$tmp" "$TASKS_FILE" || rm -f "$tmp"
+}
+
+update_task_verify_output() {
+    local task_id="$1" voutput="$2"
+    local tmp=$(mktemp)
+    jq --arg id "$task_id" --arg vo "$voutput" \
+        '(.tasks[] | select(.id == $id)).verify_output = $vo' \
+        "$TASKS_FILE" > "$tmp" && mv "$tmp" "$TASKS_FILE" || rm -f "$tmp"
+}
+
+extract_task_cost() {
+    local stream_file="$1"
+    [[ -f "$stream_file" ]] || return
+    python3 -c "
+import json, sys
+try:
+    for line in open(sys.argv[1]):
+        line = line.strip()
+        if not line: continue
+        try:
+            ev = json.loads(line)
+            if ev.get('type') == 'result' and 'total_cost_usd' in ev:
+                print(ev['total_cost_usd'])
+                break
+        except: pass
+except: pass
+" "$stream_file" 2>/dev/null || true
+}
+
+# Enhanced launch_task with ECC integration
+launch_task() {
+    local task_json="$1"
+    local id=$(echo "$task_json" | jq -r '.id')
+    local name=$(echo "$task_json" | jq -r '.name')
+    local prompt=$(echo "$task_json" | jq -r '.prompt')
+    local workdir=$(echo "$task_json" | jq -r '.workdir // "."')
+    workdir="${workdir/#\~/$HOME}"
+    local allowed_tools=$(echo "$task_json" | jq -r '.allowedTools // ""')
+
+    # ECC-aware model resolution (agent model > task model > global default)
+    local model
+    model=$(ecc_get_model_override "$task_json")
+    local effort=$(echo "$task_json" | jq -r ".effort // \"$EFFORT\"")
+
+    # Build compound system prompt (user + agents + skills)
+    local compound_prompt
+    compound_prompt=$(ecc_build_system_prompt "$task_json")
+
+    # Resolve hook profile
+    local hook_profile
+    hook_profile=$(ecc_get_hook_profile "$task_json")
+
+    local log_file="$LOG_DIR/${id}.log"
+    local out_file="$LOG_DIR/${id}.output.md"
+    local stream_file="$LOG_DIR/${id}.stream.jsonl"
+
+    # Enhanced logging with ECC metadata
+    local agents_info=$(echo "$task_json" | jq -r '.agents // "none"')
+    local skills_info=$(echo "$task_json" | jq -r '.skills // "none"')
+    log "Starting: ${GREEN}$name${NC} (model=${BLUE}$model${NC}, agents=${MAGENTA}$agents_info${NC}, skills=${MAGENTA}$skills_info${NC}, hooks=$hook_profile)"
+
+    local cmd=("$CLAUDE_CMD" --print --verbose --model "$model" --output-format stream-json --dangerously-skip-permissions)
+
+    # Only add --effort if CLI supports it (check once, cache result)
+    if [[ -z "${_EFFORT_SUPPORTED:-}" ]]; then
+        if "$CLAUDE_CMD" --help 2>&1 | grep -q '\-\-effort'; then
+            _EFFORT_SUPPORTED="yes"
+        else
+            _EFFORT_SUPPORTED="no"
+        fi
+    fi
+    if [[ "$_EFFORT_SUPPORTED" == "yes" && -n "$effort" ]]; then
+        cmd+=(--effort "$effort")
+    fi
+
+    if [[ -n "$allowed_tools" ]]; then
+        read -ra tools_arr <<< "$allowed_tools"; cmd+=(--allowedTools "${tools_arr[@]}")
+    fi
+    if [[ -n "$compound_prompt" ]]; then
+        cmd+=(--append-system-prompt "$compound_prompt")
+    fi
+
+    (
+        cd "$workdir"
+        export ECC_HOOK_PROFILE="$hook_profile"
+        echo "$prompt" | "${cmd[@]}" 2> "$log_file" | tee "$stream_file" | jq -r --unbuffered '
+            select(.type == "assistant")
+            | .message.content[]? | select(.type == "text") | .text // empty
+        ' > "$out_file"
+    ) &
+    local pid=$!
+
+    local max_retries=$(echo "$task_json" | jq -r '.max_retries // 0')
+    local retry_delay=$(echo "$task_json" | jq -r '.retry_delay_seconds // 5')
+    local retry_backoff=$(echo "$task_json" | jq -r '.retry_backoff // "fixed"')
+    local verify_strategy=$(echo "$task_json" | jq -r '.verify_strategy // "none"')
+    local verify_command=$(echo "$task_json" | jq -r '.verify_command // ""')
+    local verify_timeout=$(echo "$task_json" | jq -r '.verify_timeout // 60')
+    local verify_prompt=$(echo "$task_json" | jq -r '.verify_prompt // ""')
+
+    PIDS[$pid]="$id"
+    TASK_NAMES[$id]="$name"
+    TASK_STARTS[$id]=$(date +%s)
+    TASK_ATTEMPTS[$id]="${TASK_ATTEMPTS[$id]:-1}"
+    TASK_MAX_RETRIES[$id]="$max_retries"
+    TASK_RETRY_DELAY[$id]="$retry_delay"
+    TASK_RETRY_BACKOFF[$id]="$retry_backoff"
+    TASK_JSON_CACHE[$id]="$task_json"
+    TASK_VERIFY_STRATEGY[$id]="$verify_strategy"
+    TASK_VERIFY_CMD[$id]="$verify_command"
+    TASK_VERIFY_TIMEOUT[$id]="$verify_timeout"
+    TASK_VERIFY_PROMPT[$id]="$verify_prompt"
+    TASK_WORKDIRS[$id]="$workdir"
+    update_task_status "$id" "running"
+    update_task_started_at "$id" "${TASK_STARTS[$id]}"
+    update_task_attempt "$id" "${TASK_ATTEMPTS[$id]}" "$((max_retries + 1))"
+    write_state
+}
+
+# Reap completed tasks
+reap() {
+    [[ ${#PIDS[@]} -eq 0 ]] && return
+    for pid in "${!PIDS[@]}"; do
+        if ! kill -0 "$pid" 2>/dev/null; then
+            local id="${PIDS[$pid]}"
+            local name="${TASK_NAMES[$id]}"
+            local start="${TASK_STARTS[$id]}"
+            local finished_at=$(date +%s)
+            local elapsed=$(( finished_at - start ))
+            local mins=$(( elapsed / 60 ))
+            local secs=$(( elapsed % 60 ))
+
+            local exit_code=0
+            wait "$pid" 2>/dev/null || exit_code=$?
+
+            if [[ $exit_code -eq 0 ]]; then
+                local strategy="${TASK_VERIFY_STRATEGY[$id]:-none}"
+
+                if [[ "$strategy" == "command" && -n "${TASK_VERIFY_CMD[$id]:-}" ]]; then
+                    # Run post-task verification command
+                    update_task_status "$id" "verifying"
+                    write_state
+
+                    local workdir="${TASK_WORKDIRS[$id]:-.}"
+                    local verify_log="$LOG_DIR/${id}.verify.log"
+                    local verify_exit=0
+                    (cd "$workdir" && timeout "${TASK_VERIFY_TIMEOUT[$id]}" bash -c "${TASK_VERIFY_CMD[$id]}") > "$verify_log" 2>&1 || verify_exit=$?
+
+                    if [[ $verify_exit -eq 0 ]]; then
+                        update_task_verify_status "$id" "passed"
+                        log "✓ ${GREEN}Verified${NC}: $name"
+                        log "✓ ${GREEN}Completed${NC}: $name (${mins}m${secs}s)"
+                        update_task_status "$id" "done"
+                        update_task_finished_at "$id" "$finished_at" "$elapsed"
+
+                        local cost
+                        cost=$(extract_task_cost "$LOG_DIR/${id}.stream.jsonl")
+                        if [[ -n "$cost" ]]; then
+                            update_task_cost "$id" "$cost"
+                            log "  cost: \$${cost}"
+                        fi
+
+                        unset "PIDS[$pid]"
+                        write_state
+                    else
+                        local verify_output
+                        verify_output=$(tail -c 500 "$verify_log")
+                        update_task_verify_status "$id" "failed"
+                        update_task_verify_output "$id" "$verify_output"
+
+                        local attempt="${TASK_ATTEMPTS[$id]:-1}"
+                        local max_retries="${TASK_MAX_RETRIES[$id]:-0}"
+
+                        if [[ $attempt -le $max_retries ]]; then
+                            # Retry with verification feedback injected into prompt
+                            log "✗ ${RED}Verification failed${NC}: $name (retrying with feedback)"
+                            TASK_JSON_CACHE[$id]=$(echo "${TASK_JSON_CACHE[$id]}" | jq --arg fb "PREVIOUS ATTEMPT FAILED VERIFICATION:\n${verify_output}\n\nFix the issues above and try again.\n\nOriginal task:" '.prompt = ($fb + "\n" + .prompt)')
+
+                            update_task_status "$id" "retrying"
+                            write_state
+
+                            local retry_delay="${TASK_RETRY_DELAY[$id]:-5}"
+                            local retry_backoff="${TASK_RETRY_BACKOFF[$id]:-fixed}"
+                            local calculated_delay
+                            if [[ "$retry_backoff" == "exponential" ]]; then
+                                calculated_delay=$(( retry_delay * (1 << (attempt - 1)) ))
+                            else
+                                calculated_delay="$retry_delay"
+                            fi
+
+                            sleep "$calculated_delay"
+
+                            TASK_ATTEMPTS[$id]=$((attempt + 1))
+                            unset "PIDS[$pid]"
+                            launch_task "${TASK_JSON_CACHE[$id]}"
+                            TASK_ATTEMPTS[$id]=$((attempt + 1))
+
+                            continue
+                        else
+                            # No retries remain — mark failed
+                            log "✗ ${RED}Verification failed${NC}: $name (no retries left)"
+                            update_task_status "$id" "failed"
+                            update_task_finished_at "$id" "$finished_at" "$elapsed"
+
+                            local cost
+                            cost=$(extract_task_cost "$LOG_DIR/${id}.stream.jsonl")
+                            if [[ -n "$cost" ]]; then
+                                update_task_cost "$id" "$cost"
+                                log "  cost: \$${cost}"
+                            fi
+
+                            unset "PIDS[$pid]"
+                            write_state
+                        fi
+                    fi
+                elif [[ "$strategy" == "claude" ]]; then
+                    # Run Claude haiku verification session
+                    update_task_status "$id" "verifying"
+                    write_state
+
+                    local task_output
+                    task_output=$(head -c 10000 "$LOG_DIR/${id}.output.md" 2>/dev/null || echo "(no output)")
+                    local verify_criteria="${TASK_VERIFY_PROMPT[$id]:-Review the output for correctness}"
+
+                    local verify_full="You are a verification reviewer. Evaluate the following task output against the given criteria. Respond with EXACTLY one word on the first line: PASS or FAIL. Then on the next line, give a brief reason (1-2 sentences).
+
+CRITERIA: ${verify_criteria}
+
+TASK OUTPUT:
+${task_output}"
+
+                    local verify_md="$LOG_DIR/${id}.verify.md"
+                    local verify_log="$LOG_DIR/${id}.verify.log"
+                    local claude_verify_exit=0
+                    echo "$verify_full" | "$CLAUDE_CMD" --print --model haiku > "$verify_md" 2>"$verify_log" || claude_verify_exit=$?
+
+                    local first_line
+                    first_line=$(head -1 "$verify_md" 2>/dev/null || echo "")
+                    local claude_verdict="failed"
+                    if [[ "$first_line" == PASS* ]]; then
+                        claude_verdict="passed"
+                    fi
+
+                    local verify_response
+                    verify_response=$(head -c 500 "$verify_md" 2>/dev/null || echo "")
+
+                    # Add verification cost to task cost if available
+                    local verify_cost
+                    verify_cost=$(extract_task_cost "$verify_log")
+                    if [[ -n "$verify_cost" ]]; then
+                        local existing_cost
+                        existing_cost=$(jq -r --arg id "$id" '(.tasks[] | select(.id == $id)).cost_usd // 0' "$TASKS_FILE")
+                        if [[ -n "$existing_cost" && "$existing_cost" != "null" && "$existing_cost" != "0" ]]; then
+                            local total_cost
+                            total_cost=$(python3 -c "print(${existing_cost} + ${verify_cost})" 2>/dev/null || echo "$verify_cost")
+                            update_task_cost "$id" "$total_cost"
+                        else
+                            update_task_cost "$id" "$verify_cost"
+                        fi
+                    fi
+
+                    if [[ "$claude_verdict" == "passed" ]]; then
+                        update_task_verify_status "$id" "passed"
+                        update_task_verify_output "$id" "$verify_response"
+                        log "✓ ${GREEN}Verified (claude)${NC}: $name"
+                        log "✓ ${GREEN}Completed${NC}: $name (${mins}m${secs}s)"
+                        update_task_status "$id" "done"
+                        update_task_finished_at "$id" "$finished_at" "$elapsed"
+
+                        local cost
+                        cost=$(extract_task_cost "$LOG_DIR/${id}.stream.jsonl")
+                        if [[ -n "$cost" ]]; then
+                            update_task_cost "$id" "$cost"
+                            log "  cost: \$${cost}"
+                        fi
+
+                        unset "PIDS[$pid]"
+                        write_state
+                    else
+                        update_task_verify_status "$id" "failed"
+                        update_task_verify_output "$id" "$verify_response"
+
+                        local attempt="${TASK_ATTEMPTS[$id]:-1}"
+                        local max_retries="${TASK_MAX_RETRIES[$id]:-0}"
+
+                        if [[ $attempt -le $max_retries ]]; then
+                            log "✗ ${RED}Verification failed (claude)${NC}: $name (retrying with feedback)"
+                            TASK_JSON_CACHE[$id]=$(echo "${TASK_JSON_CACHE[$id]}" | jq --arg fb "PREVIOUS ATTEMPT FAILED VERIFICATION:\n${verify_response}\n\nFix the issues above and try again.\n\nOriginal task:" '.prompt = ($fb + "\n" + .prompt)')
+
+                            update_task_status "$id" "retrying"
+                            write_state
+
+                            local retry_delay="${TASK_RETRY_DELAY[$id]:-5}"
+                            local retry_backoff="${TASK_RETRY_BACKOFF[$id]:-fixed}"
+                            local calculated_delay
+                            if [[ "$retry_backoff" == "exponential" ]]; then
+                                calculated_delay=$(( retry_delay * (1 << (attempt - 1)) ))
+                            else
+                                calculated_delay="$retry_delay"
+                            fi
+
+                            sleep "$calculated_delay"
+
+                            TASK_ATTEMPTS[$id]=$((attempt + 1))
+                            unset "PIDS[$pid]"
+                            launch_task "${TASK_JSON_CACHE[$id]}"
+                            TASK_ATTEMPTS[$id]=$((attempt + 1))
+
+                            continue
+                        else
+                            log "✗ ${RED}Verification failed (claude)${NC}: $name (no retries left)"
+                            update_task_status "$id" "failed"
+                            update_task_finished_at "$id" "$finished_at" "$elapsed"
+
+                            local cost
+                            cost=$(extract_task_cost "$LOG_DIR/${id}.stream.jsonl")
+                            if [[ -n "$cost" ]]; then
+                                update_task_cost "$id" "$cost"
+                                log "  cost: \$${cost}"
+                            fi
+
+                            unset "PIDS[$pid]"
+                            write_state
+                        fi
+                    fi
+                else
+                    # No verification — mark done immediately
+                    update_task_verify_status "$id" "skipped"
+                    log "✓ ${GREEN}Completed${NC}: $name (${mins}m${secs}s)"
+                    update_task_status "$id" "done"
+                    update_task_finished_at "$id" "$finished_at" "$elapsed"
+
+                    local cost
+                    cost=$(extract_task_cost "$LOG_DIR/${id}.stream.jsonl")
+                    if [[ -n "$cost" ]]; then
+                        update_task_cost "$id" "$cost"
+                        log "  cost: \$${cost}"
+                    fi
+
+                    unset "PIDS[$pid]"
+                    write_state
+                fi
+            else
+                local attempt="${TASK_ATTEMPTS[$id]:-1}"
+                local max_retries="${TASK_MAX_RETRIES[$id]:-0}"
+                local retry_delay="${TASK_RETRY_DELAY[$id]:-5}"
+                local retry_backoff="${TASK_RETRY_BACKOFF[$id]:-fixed}"
+
+                if [[ $attempt -le $max_retries ]]; then
+                    # Retries remain
+                    local next_attempt=$((attempt + 1))
+                    log "↻ Retrying: $name (attempt ${next_attempt}/$((max_retries + 1)), exit=$exit_code)"
+                    update_task_status "$id" "retrying"
+                    write_state
+
+                    # Calculate delay: exponential uses delay * 2^(attempt-1)
+                    local calculated_delay
+                    if [[ "$retry_backoff" == "exponential" ]]; then
+                        calculated_delay=$(( retry_delay * (1 << (attempt - 1)) ))
+                    else
+                        calculated_delay="$retry_delay"
+                    fi
+
+                    sleep "$calculated_delay"
+
+                    # Increment attempt counter
+                    TASK_ATTEMPTS[$id]=$((attempt + 1))
+
+                    # Free the slot
+                    unset "PIDS[$pid]"
+
+                    # Re-launch from cached task JSON
+                    launch_task "${TASK_JSON_CACHE[$id]}"
+
+                    # Restore attempt counter (launch_task defaults to 1 if unset)
+                    TASK_ATTEMPTS[$id]=$next_attempt
+
+                    continue
+                else
+                    # No retries remain — mark failed
+                    log "✗ ${RED}Failed${NC}: $name (exit=$exit_code, ${mins}m${secs}s)"
+                    update_task_status "$id" "failed"
+                    update_task_finished_at "$id" "$finished_at" "$elapsed"
+
+                    local cost
+                    cost=$(extract_task_cost "$LOG_DIR/${id}.stream.jsonl")
+                    if [[ -n "$cost" ]]; then
+                        update_task_cost "$id" "$cost"
+                        log "  cost: \$${cost}"
+                    fi
+
+                    unset "PIDS[$pid]"
+                    write_state
+                fi
+            fi
+        fi
+    done
+}
+
+# Cleanup on exit
+cleanup() {
+    log "Shutting down..."
+    for pid in "${!PIDS[@]}"; do
+        kill "$pid" 2>/dev/null || true
+    done
+    wait 2>/dev/null
+    log "Done. Logs in: $LOG_DIR"
+}
+trap cleanup EXIT INT TERM
+
+# Main loop
+while true; do
+    reap
+
+    running=${#PIDS[@]}
+
+    slots=$(( MAX_PARALLEL - running ))
+    if [[ $slots -gt 0 ]]; then
+        launched=0
+        while IFS= read -r task_json; do
+            [[ -z "$task_json" ]] && continue
+            launch_task "$task_json"
+            launched=$(( launched + 1 ))
+            slots=$(( slots - 1 ))
+            [[ $slots -le 0 ]] && break
+            # Stagger launches to avoid OAuth rate limiting (configurable)
+            [[ $launched -gt 0 ]] && sleep "${LAUNCH_DELAY:-2}"
+        done < <(jq -c '.tasks[] | select(.status == "pending")' "$TASKS_FILE" | head -n "$slots")
+    fi
+
+    remaining=$(jq '[.tasks[] | select(.status == "pending" or .status == "running" or .status == "retrying" or .status == "verifying")] | length' "$TASKS_FILE")
+    if [[ $remaining -eq 0 && ${#PIDS[@]} -eq 0 ]]; then
+        echo ""
+        log "All tasks complete"
+        echo ""
+        done_count=$(jq '[.tasks[] | select(.status == "done")] | length' "$TASKS_FILE")
+        fail_count=$(jq '[.tasks[] | select(.status == "failed")] | length' "$TASKS_FILE")
+        retry_count=$(jq '[.tasks[] | select((.attempt // 1) > 1)] | length' "$TASKS_FILE")
+        log "Results: ${GREEN}$done_count done${NC}, ${RED}$fail_count failed${NC}, ${YELLOW}$retry_count retried${NC}"
+        log "Outputs in: $LOG_DIR/"
+        write_state
+        break
+    fi
+
+    sleep "$POLL_INTERVAL"
+done

@@ -1,0 +1,683 @@
+#!/usr/bin/env python3
+"""
+claude-orchestra TUI dashboard — production real-time task monitoring.
+
+Displays a live-updating terminal UI with:
+  - Header bar with project name, clock, and ECC status
+  - Brainstorm/output panel showing completed task results
+  - Task table with color-coded status, live duration ticker, and cost
+  - Footer summary with totals
+
+Usage:
+    orchestra-dashboard <tasks.json>
+    orchestra-dashboard <logs/run-dir/>
+
+Requires: pip install rich
+"""
+
+import json
+import sys
+import time
+from datetime import datetime
+from pathlib import Path
+
+try:
+    from rich.console import Console, Group
+    from rich.live import Live
+    from rich.table import Table
+    from rich.panel import Panel
+    from rich.text import Text
+    from rich import box
+except ImportError:
+    print("Missing dependency: pip install rich")
+    sys.exit(1)
+
+SPINNERS = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
+_tick = 0
+
+
+# ── File Resolution ──────────────────────────────────────────────────────────
+
+
+def find_log_dir(base_path: Path) -> Path | None:
+    """Find the most recent log directory containing a state.json."""
+    for base in [base_path.parent, Path(".")]:
+        log_dirs = sorted(
+            base.glob("logs/*/state.json"),
+            key=lambda x: x.stat().st_mtime,
+            reverse=True,
+        )
+        if log_dirs:
+            return log_dirs[0].parent
+    return None
+
+
+def find_files(arg: str):
+    """Resolve tasks file and state file from CLI argument."""
+    p = Path(arg)
+    if p.is_dir():
+        state_file = p / "state.json"
+        tasks_file = None
+        for search_dir in [p, p.parent]:
+            for candidate in sorted(search_dir.glob("tasks*.json")):
+                tasks_file = candidate
+                break
+            if tasks_file:
+                break
+        return tasks_file, state_file if state_file.exists() else None
+    elif p.is_file() and p.suffix == ".json":
+        log_dir = find_log_dir(p)
+        state_file = (log_dir / "state.json") if log_dir else None
+        return p, state_file
+    else:
+        print(f"Not found: {arg}")
+        sys.exit(1)
+
+
+# ── Data Loading ─────────────────────────────────────────────────────────────
+
+
+def load_json(path: Path | None) -> dict | None:
+    if path and path.exists():
+        try:
+            return json.loads(path.read_text())
+        except (json.JSONDecodeError, FileNotFoundError):
+            return None
+    return None
+
+
+def resolve_log_dir(state: dict | None, tasks_file: Path | None) -> Path | None:
+    """Find the log directory from state.json or by scanning."""
+    if state:
+        ld = Path(state.get("log_dir", ""))
+        if ld.exists():
+            return ld
+        if tasks_file:
+            ld = tasks_file.parent / state.get("log_dir", "")
+            if ld.exists():
+                return ld
+    if tasks_file:
+        return find_log_dir(tasks_file)
+    return None
+
+
+# ── Formatting ───────────────────────────────────────────────────────────────
+
+
+def fmt_mmss(seconds) -> str:
+    """Format seconds as MM:SS or H:MM:SS. Returns --:-- for None."""
+    if seconds is None or seconds < 0:
+        return "--:--"
+    s = int(seconds)
+    m, s = divmod(s, 60)
+    if m >= 60:
+        h, m = divmod(m, 60)
+        return f"{h}:{m:02d}:{s:02d}"
+    return f"{m:02d}:{s:02d}"
+
+
+def fmt_cost(cost) -> str:
+    """Format USD cost. Returns — for None/zero."""
+    if cost is None:
+        return "—"
+    c = float(cost)
+    if c == 0:
+        return "—"
+    return f"${c:.4f}" if c < 0.01 else f"${c:.2f}"
+
+
+def fmt_size(nbytes: int) -> str:
+    if nbytes < 1024:
+        return f"{nbytes}B"
+    if nbytes < 1024 * 1024:
+        return f"{nbytes / 1024:.1f}K"
+    return f"{nbytes / (1024 * 1024):.1f}M"
+
+
+# ── Stream Analysis ──────────────────────────────────────────────────────────
+
+
+def get_last_activity(stream_file: Path) -> str:
+    """Extract the last tool call from the stream JSONL tail."""
+    if not stream_file.exists():
+        return ""
+    try:
+        size = stream_file.stat().st_size
+        with open(stream_file, "rb") as f:
+            if size > 8192:
+                f.seek(size - 8192)
+            data = f.read().decode("utf-8", errors="replace")
+
+        for line in reversed(data.strip().split("\n")):
+            if not line.strip():
+                continue
+            try:
+                ev = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if ev.get("type") == "assistant":
+                for block in ev.get("message", {}).get("content", []):
+                    if block.get("type") == "tool_use":
+                        return _summarize_tool(
+                            block.get("name", ""), block.get("input", {})
+                        )
+        return ""
+    except Exception:
+        return ""
+
+
+def _summarize_tool(tool: str, inp: dict) -> str:
+    """One-line summary of a tool call."""
+    if tool == "Read":
+        fp = inp.get("file_path", "")
+        return f"Read {Path(fp).name}" if fp else "Read..."
+    if tool == "Glob":
+        return f"Glob {inp.get('pattern', '...')}"
+    if tool == "Grep":
+        pat = inp.get("pattern", "")
+        return f"Grep {pat[:28]}" if pat else "Grep..."
+    if tool == "Edit":
+        fp = inp.get("file_path", "")
+        return f"Edit {Path(fp).name}" if fp else "Edit..."
+    if tool == "Write":
+        fp = inp.get("file_path", "")
+        return f"Write {Path(fp).name}" if fp else "Write..."
+    if tool == "Bash":
+        cmd = inp.get("command", "").replace("\n", " ").strip()
+        return f"$ {cmd[:33]}" if cmd else "$ ..."
+    if tool == "Agent":
+        desc = inp.get("description", "")
+        return f"Agent: {desc[:28]}" if desc else "Agent..."
+    return tool
+
+
+# ── Task Data Extraction ─────────────────────────────────────────────────────
+
+
+def _find_in_state(state: dict | None, tid: str) -> dict | None:
+    """Look up a task by id in state.json tasks array."""
+    if not state:
+        return None
+    for st in state.get("tasks", []):
+        if st.get("id") == tid:
+            return st
+    return None
+
+
+def get_task_duration(
+    task: dict, state: dict | None, log_dir: Path | None, now: float
+) -> int | None:
+    """Get task duration in seconds.
+
+    For completed tasks: uses stored elapsed_seconds.
+    For running tasks: computes live elapsed from started_at.
+    Falls back to stream file ctime if no timestamps stored.
+    """
+    status = task.get("status", "pending")
+    tid = task.get("id", "")
+    st = _find_in_state(state, tid)
+
+    if status in ("done", "failed"):
+        for src in (st, task):
+            if src and src.get("elapsed_seconds") is not None:
+                return int(src["elapsed_seconds"])
+        # Fallback: compute from started_at/finished_at if available
+        for src in (st, task):
+            if src:
+                started = src.get("started_at")
+                finished = src.get("finished_at")
+                if started is not None and finished is not None:
+                    return int(finished - started)
+
+    if status in ("running", "retrying", "verifying"):
+        for src in (st, task):
+            if src and src.get("started_at") is not None:
+                return int(now - src["started_at"])
+        # Fallback: stream file creation time
+        if log_dir:
+            sf = log_dir / f"{tid}.stream.jsonl"
+            if sf.exists():
+                try:
+                    ctime = getattr(
+                        sf.stat(), "st_birthtime", sf.stat().st_ctime
+                    )
+                    return int(now - ctime)
+                except Exception:
+                    pass
+
+    return None
+
+
+def get_task_cost(task: dict, state: dict | None) -> float | None:
+    """Get cost from state.json (preferred) or tasks.json."""
+    tid = task.get("id", "")
+    st = _find_in_state(state, tid)
+    for src in (st, task):
+        if src and src.get("cost_usd") is not None:
+            return float(src["cost_usd"])
+    return None
+
+
+def get_task_ecc(task: dict, state: dict | None) -> tuple[str, str]:
+    """Get agents and skills strings from state or task data."""
+    tid = task.get("id", "")
+    st = _find_in_state(state, tid)
+    for src in (st, task):
+        if src:
+            agents = src.get("agents") or ""
+            skills = src.get("skills") or ""
+            if agents or skills:
+                return agents, skills
+    return "", ""
+
+
+def status_badge(status: str) -> Text:
+    """Color-coded status badge for the task table."""
+    badges = {
+        "done": ("DONE", "bold green"),
+        "running": ("RUN", "bold blue"),
+        "failed": ("FAIL", "bold red"),
+        "retrying": ("RETRY", "bold yellow"),
+        "verifying": ("VRFY", "bold cyan"),
+    }
+    label, style = badges.get(status, ("WAIT", "dim"))
+    return Text(label, style=style)
+
+
+# ── Brainstorm / Output Panel ────────────────────────────────────────────────
+
+
+def build_brainstorm_panel(
+    log_dir: Path | None, tasks: list, max_lines: int
+) -> Panel | None:
+    """Build a panel showing completed task outputs.
+
+    Returns None if no output is available yet.
+    """
+    if not log_dir:
+        return None
+
+    done_tasks = [t for t in tasks if t.get("status") in ("done", "failed")]
+    if not done_tasks:
+        return None
+
+    content = Text()
+    lines_used = 0
+
+    for i, t in enumerate(done_tasks):
+        tid = t.get("id", "")
+        name = t.get("name", tid)
+        task_status = t.get("status", "done")
+
+        if lines_used >= max_lines:
+            remaining = len(done_tasks) - i
+            content.append(
+                f"\n  … {remaining} more task outputs", style="dim italic"
+            )
+            break
+
+        output_file = log_dir / f"{tid}.output.md"
+        if not output_file.exists():
+            continue
+
+        try:
+            raw = output_file.read_text().strip()
+        except Exception:
+            continue
+        if not raw:
+            continue
+
+        # Separator between tasks
+        if lines_used > 0:
+            content.append("\n\n")
+            lines_used += 2
+
+        # Task header
+        icon = "✓" if task_status == "done" else "✗"
+        icon_style = "green bold" if task_status == "done" else "red bold"
+        content.append(f" {icon} ", style=icon_style)
+        content.append(name, style="bold underline")
+        content.append("\n")
+        lines_used += 1
+
+        # Task output (truncated to budget)
+        lines = raw.split("\n")
+        budget = max_lines - lines_used
+        display_lines = lines[:budget] if len(lines) > budget else lines
+
+        for line in display_lines:
+            content.append(f"   {line}\n")
+
+        if len(lines) > budget:
+            content.append(
+                f"   … ({len(lines) - budget} more lines)\n",
+                style="dim italic",
+            )
+            lines_used += budget + 1
+        else:
+            lines_used += len(lines)
+
+    if lines_used == 0:
+        return None
+
+    return Panel(
+        content,
+        title="[bold cyan]Output[/bold cyan]",
+        title_align="left",
+        border_style="cyan",
+        padding=(0, 1),
+    )
+
+
+# ── Main Display Builder ─────────────────────────────────────────────────────
+
+
+def build_display(
+    tasks_file: Path | None,
+    state_file: Path | None,
+    start_time: float,
+    console: Console,
+) -> Panel:
+    """Build the complete dashboard panel for one render cycle."""
+    global _tick
+    _tick += 1
+    now = time.time()
+
+    data = load_json(tasks_file) or {"tasks": []}
+    state = load_json(state_file)
+
+    # Use state tasks as fallback when no tasks file found
+    tasks = data.get("tasks", [])
+    if not tasks and state:
+        tasks = state.get("tasks", [])
+
+    log_dir = resolve_log_dir(state, tasks_file)
+
+    # ── Aggregate metrics ──
+    counts = {"pending": 0, "running": 0, "done": 0, "failed": 0,
+              "retrying": 0, "verifying": 0}
+    total_cost = 0.0
+    sum_task_time = 0
+    has_retries = False
+    has_verify = False
+
+    for t in tasks:
+        s = t.get("status", "pending")
+        counts[s] = counts.get(s, 0) + 1
+
+        cost = get_task_cost(t, state)
+        if cost:
+            total_cost += cost
+
+        dur = get_task_duration(t, state, log_dir, now)
+        if dur is not None and s in ("done", "failed"):
+            sum_task_time += dur
+
+        st = _find_in_state(state, t.get("id", ""))
+        max_att = (st or t).get("max_attempts", 1)
+        vs = (st or t).get("verify_status", "skipped")
+        if max_att > 1:
+            has_retries = True
+        if vs != "skipped":
+            has_verify = True
+
+    total = len(tasks)
+    orch_start = state.get("started_at", start_time) if state else start_time
+    wall_elapsed = int(now - orch_start)
+    spinner = SPINNERS[_tick % len(SPINNERS)]
+    ecc = state.get("ecc_enabled", False) if state else False
+
+    # Derive project/pipeline name from tasks filename
+    pipeline_name = ""
+    if tasks_file:
+        stem = tasks_file.stem
+        if stem.startswith("tasks-"):
+            pipeline_name = stem[6:].replace("-", " ").title()
+        elif stem != "tasks":
+            pipeline_name = stem.replace("-", " ").title()
+
+    parts: list = []
+
+    # ── Header Bar ──
+    hdr = Text()
+    if pipeline_name:
+        hdr.append(f"  {pipeline_name}", style="bold white")
+        hdr.append("  │  ", style="dim")
+    hdr.append(datetime.now().strftime("%H:%M:%S"), style="")
+    hdr.append("  │  ", style="dim")
+    hdr.append("ECC ", style="dim")
+    hdr.append("●" if ecc else "○", style="green bold" if ecc else "dim")
+    hdr.append("  │  ", style="dim")
+    hdr.append(f"Elapsed {fmt_mmss(wall_elapsed)}", style="dim")
+
+    # All done indicator
+    terminal = counts["done"] + counts["failed"]
+    if total > 0 and terminal == total:
+        hdr.append("  │  ", style="dim")
+        if counts["failed"] == 0:
+            hdr.append("✓ ALL DONE", style="bold green")
+        else:
+            hdr.append(
+                f"FINISHED ({counts['failed']} failed)", style="bold yellow"
+            )
+
+    parts.append(hdr)
+    parts.append(Text(""))
+
+    # ── Brainstorm / Output Panel (TOP position) ──
+    term_h = console.height or 40
+    max_brainstorm = max(6, min(term_h // 3, 30))
+    bp = build_brainstorm_panel(log_dir, tasks, max_brainstorm)
+    if bp:
+        parts.append(bp)
+        parts.append(Text(""))
+
+    # ── Task Table ──
+    # Column widths balanced to fit within panel:
+    # 6 + 35 + 6 + 14 + 9 + 8 + 22 = 100 + 14 padding = 114
+    table = Table(
+        show_header=True,
+        header_style="bold dim",
+        box=box.SIMPLE_HEAVY,
+        padding=(0, 1),
+        expand=True,
+    )
+    table.add_column("Status", width=6, justify="center", no_wrap=True)
+    table.add_column(
+        "Task", min_width=18, max_width=35, no_wrap=True, overflow="ellipsis",
+        ratio=2,
+    )
+    table.add_column("Model", width=6, justify="center", no_wrap=True)
+    table.add_column(
+        "Agents", width=14, no_wrap=True, overflow="ellipsis"
+    )
+    if has_retries:
+        table.add_column("Att", width=5, justify="center", no_wrap=True)
+    if has_verify:
+        table.add_column("V", width=3, justify="center", no_wrap=True)
+    table.add_column("Duration", width=9, justify="right", no_wrap=True)
+    table.add_column("Cost", width=8, justify="right", no_wrap=True)
+    table.add_column(
+        "Activity",
+        min_width=10,
+        max_width=22,
+        no_wrap=True,
+        overflow="ellipsis",
+        ratio=1,
+    )
+
+    for t in tasks:
+        tid = t.get("id", "?")
+        name = t.get("name", tid)
+        model = t.get("model", "opus")
+        task_status = t.get("status", "pending")
+        agents, _ = get_task_ecc(t, state)
+
+        # Duration with live spinner for running/retrying/verifying tasks
+        dur = get_task_duration(t, state, log_dir, now)
+        dur_str = fmt_mmss(dur)
+        if task_status in ("running", "retrying", "verifying") and dur is not None:
+            dur_str = f"{spinner} {dur_str}"
+
+        cost = get_task_cost(t, state)
+        cost_str = fmt_cost(cost)
+
+        # Activity only for running tasks
+        activity = ""
+        if task_status == "running" and log_dir:
+            activity = get_last_activity(log_dir / f"{tid}.stream.jsonl")
+
+        # Row styling by status
+        name_style = {
+            "done": "green",
+            "running": "bold",
+            "failed": "red",
+            "pending": "dim",
+            "retrying": "yellow",
+            "verifying": "cyan",
+        }.get(task_status, "dim")
+
+        # Build row cells
+        row_cells = [
+            status_badge(task_status),
+            Text(name, style=name_style, overflow="ellipsis", no_wrap=True),
+            Text(
+                model,
+                style="cyan" if task_status in ("running", "verifying") else "dim",
+            ),
+            Text(
+                agents or "—",
+                style="magenta" if agents else "dim",
+            ),
+        ]
+
+        # Conditional Attempts column
+        if has_retries:
+            st_data = _find_in_state(state, tid) or t
+            att = st_data.get("attempt", 1)
+            max_att = st_data.get("max_attempts", 1)
+            att_str = f"{att}/{max_att}"
+            att_style = "bold yellow" if att > 1 else "dim"
+            row_cells.append(Text(att_str, style=att_style))
+
+        # Conditional Verify column
+        if has_verify:
+            st_data = _find_in_state(state, tid) or t
+            vs = st_data.get("verify_status", "skipped")
+            if vs == "passed":
+                row_cells.append(Text("✓", style="green"))
+            elif vs == "failed":
+                row_cells.append(Text("✗", style="red"))
+            else:
+                row_cells.append(Text("—", style="dim"))
+
+        row_cells.extend([
+            Text(
+                dur_str,
+                style="bold yellow" if task_status in ("running", "retrying", "verifying") else "",
+            ),
+            Text(
+                cost_str,
+                style="yellow" if cost else "dim",
+            ),
+            Text(
+                activity or "",
+                style="cyan dim",
+                overflow="ellipsis",
+                no_wrap=True,
+            ),
+        ])
+
+        table.add_row(*row_cells)
+
+    parts.append(table)
+
+    # ── Footer Summary ──
+    foot = Text()
+    foot.append("  ")
+    foot.append(f"Done: ", style="dim")
+    foot.append(
+        f"{counts['done']}",
+        style="bold green" if counts["done"] == total else "green",
+    )
+    foot.append(" | ", style="dim")
+    foot.append(f"Failed: ", style="dim")
+    foot.append(f"{counts['failed']}", style="bold red" if counts["failed"] else "dim")
+    if counts["retrying"]:
+        foot.append(" | ", style="dim")
+        foot.append(f"Retrying: ", style="dim")
+        foot.append(f"{counts['retrying']}", style="bold yellow")
+    if counts["verifying"]:
+        foot.append(" | ", style="dim")
+        foot.append(f"Verifying: ", style="dim")
+        foot.append(f"{counts['verifying']}", style="bold cyan")
+    if counts["running"]:
+        foot.append(f"   {counts['running']} running", style="bold blue")
+    if counts["pending"]:
+        foot.append(f"   {counts['pending']} pending", style="dim")
+    foot.append("   │", style="dim")
+    foot.append("   Cost: ", style="dim")
+    foot.append(
+        fmt_cost(total_cost) if total_cost > 0 else "—",
+        style="yellow bold" if total_cost > 0 else "dim",
+    )
+    foot.append("   │", style="dim")
+    foot.append("   Total Time: ", style="dim")
+    foot.append(
+        fmt_mmss(sum_task_time),
+        style="bold" if sum_task_time > 0 else "dim",
+    )
+
+    parts.append(Text(""))
+    parts.append(foot)
+
+    return Panel(
+        Group(*parts),
+        title="[bold magenta]◆ claude-orchestra[/bold magenta]",
+        border_style="magenta",
+        padding=(1, 2),
+    )
+
+
+# ── Entry Point ──────────────────────────────────────────────────────────────
+
+
+def main():
+    if len(sys.argv) < 2:
+        print("Usage: orchestra-dashboard <tasks.json | logs/run-dir/>")
+        sys.exit(1)
+
+    tasks_file, state_file = find_files(sys.argv[1])
+    if not tasks_file and not state_file:
+        print(f"Could not find tasks or state from: {sys.argv[1]}")
+        sys.exit(1)
+
+    console = Console()
+    start_time = time.time()
+
+    try:
+        with Live(
+            build_display(tasks_file, state_file, start_time, console),
+            console=console,
+            refresh_per_second=1,
+            screen=False,
+        ) as live:
+            while True:
+                time.sleep(2)
+                # Auto-discover state file if not yet found
+                sf = state_file
+                if not sf or not sf.exists():
+                    if tasks_file:
+                        ld = find_log_dir(tasks_file)
+                        if ld:
+                            sf = ld / "state.json"
+                            state_file = sf
+                live.update(
+                    build_display(tasks_file, sf, start_time, console)
+                )
+    except KeyboardInterrupt:
+        pass
+
+
+if __name__ == "__main__":
+    main()

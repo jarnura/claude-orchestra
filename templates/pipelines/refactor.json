@@ -1,0 +1,47 @@
+{
+  "name": "Refactoring Pipeline",
+  "halt_on_stage_failure": true,
+  "stages": [
+    {
+      "name": "Architect",
+      "tasks": [
+        {
+          "file": "tasks-architect.json",
+          "max_parallel": 1
+        }
+      ],
+      "pass_outputs_to_next": true
+    },
+    {
+      "name": "Implement",
+      "tasks": [
+        {
+          "file": "tasks-refactor.json",
+          "max_parallel": 5
+        }
+      ],
+      "pass_outputs_to_next": true
+    },
+    {
+      "name": "Test",
+      "tasks": [
+        {
+          "file": "tasks-test.json",
+          "max_parallel": 5
+        }
+      ],
+      "pass_outputs_to_next": true
+    },
+    {
+      "name": "Review",
+      "tasks": [
+        {
+          "file": "tasks-review.json",
+          "max_parallel": 3
+        }
+      ],
+      "pass_outputs_to_next": false
+    }
+  ],
+  "aggregate": true
+}

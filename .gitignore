@@ -1,0 +1,44 @@
+# Logs — generated at runtime, can be large
+logs/
+
+# Audit task files — project-specific, generated per use
+audits/
+
+# Runtime data directory
+data/
+
+# Generated task files
+tasks-*.json
+tasks-*.md
+tasks.json
+tasks.md
+
+# Generated pipeline files (not templates)
+pipeline-*.json
+
+# Test generated files
+test-tasks-api.json
+
+# Demo files
+demo-tasks.json
+demo-tasks.md
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+*.swp
+*.swo
+*~
+.idea/
+.vscode/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Temp
+*.tmp
+*.bak

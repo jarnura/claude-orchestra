@@ -1,0 +1,4251 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>claude-orchestra</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11/styles/github-dark.min.css">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #07070a;
+  --surface: #0e0e14;
+  --surface2: #14141e;
+  --surface3: #1a1a28;
+  --border: #1f1f33;
+  --border-light: #2a2a44;
+  --accent: #c4a1ff;
+  --accent2: #8b5cf6;
+  --accent-glow: #a78bfa;
+  --accent-dim: #6d28d9;
+  --cyan: #22d3ee;
+  --cyan-dim: #0e7490;
+  --text: #e8e6f0;
+  --text-muted: #7c7a8e;
+  --text-dim: #4a4860;
+  --green: #34d399;
+  --green-dim: #065f46;
+  --yellow: #fbbf24;
+  --yellow-dim: #78350f;
+  --red: #f87171;
+  --red-dim: #7f1d1d;
+  --blue: #60a5fa;
+  --orange: #fb923c;
+  --mono: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', 'SF Mono', monospace;
+  --sans: 'Space Grotesk', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  --display: 'Space Grotesk', var(--sans);
+  --radius: 8px;
+  --radius-lg: 16px;
+  --glow-sm: 0 0 8px rgba(196, 161, 255, 0.15);
+  --glow-md: 0 0 20px rgba(196, 161, 255, 0.12), 0 0 40px rgba(139, 92, 246, 0.06);
+  --glow-lg: 0 0 30px rgba(196, 161, 255, 0.2), 0 0 60px rgba(139, 92, 246, 0.1);
+  --glow-cyan: 0 0 20px rgba(34, 211, 238, 0.15);
+  /* Stagger timing */
+  --stagger-base: 60ms;
+}
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html { font-size: 14px; scroll-behavior: smooth; }
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--sans);
+  line-height: 1.6;
+  min-height: 100vh;
+  /* Subtle scanline overlay */
+  background-image:
+    repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(255,255,255,0.008) 2px, rgba(255,255,255,0.008) 4px),
+    radial-gradient(ellipse at 50% 0%, rgba(139,92,246,0.07) 0%, transparent 60%);
+  background-attachment: fixed;
+}
+a { color: var(--accent); text-decoration: none; transition: color 0.2s; }
+a:hover { color: var(--cyan); text-decoration: none; }
+
+/* ── Stagger Animation System ── */
+@keyframes stagger-in {
+  from { opacity: 0; transform: translateY(16px) skewX(-0.5deg); filter: blur(3px); }
+  to { opacity: 1; transform: translateY(0) skewX(0deg); filter: blur(0); }
+}
+@keyframes stagger-in-left {
+  from { opacity: 0; transform: translateX(-24px) skewY(-0.5deg); }
+  to { opacity: 1; transform: translateX(0) skewY(0deg); }
+}
+@keyframes glow-pulse {
+  0%, 100% { box-shadow: var(--glow-sm); }
+  50% { box-shadow: var(--glow-md); }
+}
+@keyframes scanline-sweep {
+  0% { background-position: 0 -100%; }
+  100% { background-position: 0 200%; }
+}
+@keyframes flicker-in {
+  0% { opacity: 0; }
+  10% { opacity: 0.8; }
+  12% { opacity: 0.2; }
+  20% { opacity: 1; }
+  22% { opacity: 0.7; }
+  30% { opacity: 1; }
+}
+@keyframes text-glitch {
+  0%, 100% { text-shadow: none; }
+  20% { text-shadow: -2px 0 var(--cyan), 2px 0 var(--accent); }
+  40% { text-shadow: 2px 0 var(--red), -2px 0 var(--blue); }
+  60% { text-shadow: -1px 0 var(--accent), 1px 0 var(--cyan); }
+}
+.stagger-item {
+  opacity: 0;
+  animation: stagger-in 0.5s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+/* Generate stagger delays */
+.stagger-item:nth-child(1) { animation-delay: calc(var(--stagger-base) * 1); }
+.stagger-item:nth-child(2) { animation-delay: calc(var(--stagger-base) * 2); }
+.stagger-item:nth-child(3) { animation-delay: calc(var(--stagger-base) * 3); }
+.stagger-item:nth-child(4) { animation-delay: calc(var(--stagger-base) * 4); }
+.stagger-item:nth-child(5) { animation-delay: calc(var(--stagger-base) * 5); }
+.stagger-item:nth-child(6) { animation-delay: calc(var(--stagger-base) * 6); }
+.stagger-item:nth-child(7) { animation-delay: calc(var(--stagger-base) * 7); }
+.stagger-item:nth-child(8) { animation-delay: calc(var(--stagger-base) * 8); }
+.stagger-item:nth-child(9) { animation-delay: calc(var(--stagger-base) * 9); }
+.stagger-item:nth-child(10) { animation-delay: calc(var(--stagger-base) * 10); }
+.stagger-item:nth-child(n+11) { animation-delay: calc(var(--stagger-base) * 11); }
+
+/* ── Header — The Bold Typographic Moment ── */
+header {
+  background: linear-gradient(180deg, var(--surface) 0%, var(--bg) 100%);
+  border-bottom: 1px solid var(--border);
+  padding: 0 32px;
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  min-height: 56px;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+header::after {
+  content: '';
+  position: absolute;
+  bottom: -1px;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent 0%, var(--accent-dim) 30%, var(--accent) 50%, var(--accent-dim) 70%, transparent 100%);
+  opacity: 0.5;
+}
+.brand {
+  font-family: var(--display);
+  font-weight: 700;
+  font-size: 1.15rem;
+  letter-spacing: -0.02em;
+  color: var(--accent);
+  white-space: nowrap;
+  position: relative;
+  animation: flicker-in 0.8s ease-out;
+}
+.brand::before {
+  content: '//';
+  color: var(--text-dim);
+  margin-right: 6px;
+  font-weight: 400;
+}
+.brand:hover {
+  animation: text-glitch 0.3s ease-in-out;
+}
+.header-actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.github-link {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 6px;
+  color: var(--text-muted);
+  transition: all 0.15s;
+}
+.github-link:hover {
+  color: var(--text);
+  background: var(--surface2);
+}
+.github-link svg {
+  width: 20px;
+  height: 20px;
+}
+#breadcrumb { font-family: var(--mono); font-size: 0.8rem; color: var(--text-muted); display: flex; gap: 4px; align-items: center; overflow: hidden; }
+#breadcrumb a { color: var(--text-muted); }
+#breadcrumb a:hover { color: var(--cyan); }
+#breadcrumb .sep { color: var(--text-dim); margin: 0 4px; opacity: 0.4; }
+#breadcrumb .current { color: var(--text); font-weight: 500; }
+
+/* ── Tab bar — Diagonal accent ── */
+.tab-bar {
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  gap: 0;
+  padding: 0 32px;
+  position: sticky;
+  top: 56px;
+  z-index: 99;
+}
+.tab-bar a {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 12px 20px;
+  font-family: var(--mono);
+  font-size: 0.78rem;
+  font-weight: 500;
+  color: var(--text-dim);
+  text-decoration: none;
+  border-bottom: 2px solid transparent;
+  transition: color 0.2s, border-color 0.2s, transform 0.15s;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  position: relative;
+}
+.tab-bar a:hover {
+  color: var(--text);
+  text-decoration: none;
+  transform: translateY(-1px);
+}
+.tab-bar a.active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+  text-shadow: 0 0 12px rgba(196, 161, 255, 0.3);
+}
+/* Active tab glow underline */
+.tab-bar a.active::after {
+  content: '';
+  position: absolute;
+  bottom: -2px;
+  left: 20%;
+  right: 20%;
+  height: 2px;
+  background: var(--accent);
+  filter: blur(4px);
+}
+
+/* ── Main ── */
+main {
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 32px;
+}
+
+/* ── Loading — Retro spinner ── */
+.loading {
+  text-align: center;
+  color: var(--text-muted);
+  padding: 80px;
+  font-family: var(--mono);
+  font-size: 0.85rem;
+  letter-spacing: 0.05em;
+  animation: flicker-in 0.8s ease-out;
+}
+.loading::before {
+  content: '[ ';
+  color: var(--accent-dim);
+}
+.loading::after {
+  content: ' ]';
+  color: var(--accent-dim);
+}
+
+/* ── Error ── */
+.error-banner {
+  background: linear-gradient(135deg, var(--red-dim) 0%, #450a0a 100%);
+  border: 1px solid rgba(248, 113, 113, 0.3);
+  color: #fca5a5;
+  padding: 14px 18px;
+  border-radius: var(--radius);
+  margin: 16px 0;
+  font-family: var(--mono);
+  font-size: 0.85rem;
+  box-shadow: 0 0 20px rgba(248, 113, 113, 0.08);
+}
+
+/* ── Search ── */
+.search-box {
+  width: 100%;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 12px 16px;
+  border-radius: var(--radius);
+  font-family: var(--mono);
+  font-size: 0.85rem;
+  margin-bottom: 16px;
+  outline: none;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+.search-box:focus { border-color: var(--accent); box-shadow: var(--glow-sm); }
+.search-box::placeholder { color: var(--text-dim); }
+
+
+/* ── Runs Table ── */
+.runs-table { width: 100%; border-collapse: collapse; }
+.runs-table th { text-align: left; padding: 10px 14px; color: var(--text-dim); font-family: var(--mono); font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.08em; border-bottom: 1px solid var(--border); font-weight: 500; }
+.runs-table td { padding: 12px 14px; border-bottom: 1px solid var(--border); font-family: var(--mono); font-size: 0.85rem; }
+.runs-table tr { cursor: pointer; transition: background 0.2s, transform 0.15s; }
+.runs-table tr:hover { background: linear-gradient(90deg, var(--surface2) 0%, var(--surface) 100%); }
+.run-date { color: var(--text); white-space: nowrap; }
+.run-time { color: var(--text-muted); font-size: 0.8rem; }
+
+/* ── Status bar — Glowing segments ── */
+.status-bar { display: flex; height: 6px; border-radius: 3px; overflow: hidden; min-width: 120px; background: var(--surface3); }
+.status-bar .seg-done { background: var(--green); box-shadow: 0 0 6px rgba(52, 211, 153, 0.4); }
+.status-bar .seg-running { background: var(--yellow); box-shadow: 0 0 6px rgba(251, 191, 36, 0.4); }
+.status-bar .seg-pending { background: var(--text-dim); }
+.status-bar .seg-failed { background: var(--red); box-shadow: 0 0 6px rgba(248, 113, 113, 0.4); }
+.status-bar .seg-retrying { background: var(--yellow); box-shadow: 0 0 6px rgba(251, 191, 36, 0.4); }
+.status-bar .seg-verifying { background: var(--cyan); box-shadow: 0 0 6px rgba(34, 211, 238, 0.4); }
+
+.status-counts { font-size: 0.75rem; color: var(--text-muted); margin-top: 4px; }
+.ecc-badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 0.65rem; font-weight: 600; font-family: var(--mono); letter-spacing: 0.04em; }
+.ecc-on { background: var(--green-dim); color: var(--green); border: 1px solid rgba(52, 211, 153, 0.2); }
+.ecc-off { background: var(--surface3); color: var(--text-dim); border: 1px solid var(--border); }
+
+/* ── Badges — Retro-futuristic ── */
+.badge {
+  display: inline-block;
+  padding: 2px 10px;
+  border-radius: 4px;
+  font-size: 0.65rem;
+  font-weight: 700;
+  font-family: var(--mono);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.badge-done { background: var(--green-dim); color: var(--green); border: 1px solid rgba(52, 211, 153, 0.25); }
+.badge-running { background: var(--yellow-dim); color: var(--yellow); border: 1px solid rgba(251, 191, 36, 0.25); animation: pulse 2s infinite; }
+.badge-pending { background: var(--surface3); color: var(--text-dim); border: 1px solid var(--border); }
+.badge-failed { background: var(--red-dim); color: var(--red); border: 1px solid rgba(248, 113, 113, 0.25); }
+.badge-retrying { background: var(--yellow-dim); color: var(--yellow); border: 1px solid rgba(251, 191, 36, 0.25); animation: pulse 2s infinite; }
+.badge-verifying { background: rgba(14, 116, 144, 0.3); color: var(--cyan); border: 1px solid rgba(34, 211, 238, 0.25); animation: pulse 2s infinite; }
+.badge-verify-passed { background: var(--green-dim); color: var(--green); border: 1px solid rgba(52, 211, 153, 0.25); font-size: 0.6rem; }
+.badge-verify-failed { background: var(--red-dim); color: var(--red); border: 1px solid rgba(248, 113, 113, 0.25); font-size: 0.6rem; }
+.badge-verify-skipped { background: var(--surface3); color: var(--text-dim); border: 1px solid var(--border); font-size: 0.6rem; }
+@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+
+.badge-opus { background: rgba(59, 7, 100, 0.5); color: #c084fc; border: 1px solid rgba(139, 92, 246, 0.25); }
+.badge-sonnet { background: rgba(30, 58, 95, 0.5); color: var(--blue); border: 1px solid rgba(96, 165, 250, 0.25); }
+.badge-haiku { background: var(--green-dim); color: var(--green); border: 1px solid rgba(52, 211, 153, 0.25); }
+
+.badge-critical { background: var(--red-dim); color: var(--red); border: 1px solid var(--red); font-weight: 800; text-shadow: 0 0 8px rgba(248, 113, 113, 0.4); }
+.badge-high { background: var(--yellow-dim); color: var(--yellow); border: 1px solid var(--orange); }
+.badge-medium { background: rgba(30, 58, 95, 0.5); color: var(--blue); border: 1px solid var(--blue); }
+.badge-low { background: var(--green-dim); color: var(--green); border: 1px solid var(--green); }
+
+.tag {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 0.65rem;
+  background: var(--surface3);
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+  margin: 1px;
+  font-family: var(--mono);
+  letter-spacing: 0.02em;
+}
+
+/* ── Task Cards — Asymmetric Grid ── */
+.task-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+  gap: 16px;
+  margin-top: 20px;
+}
+/* Asymmetric: every 3rd card spans wider when possible */
+@media (min-width: 1080px) {
+  .task-grid { grid-template-columns: repeat(3, 1fr); }
+  .task-card:nth-child(7n+1) { grid-column: span 2; }
+}
+.task-card {
+  background: linear-gradient(135deg, var(--surface) 0%, var(--surface2) 100%);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 18px;
+  transition: border-color 0.25s, box-shadow 0.25s, transform 0.2s;
+  position: relative;
+  overflow: hidden;
+}
+.task-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 3px;
+  height: 100%;
+  background: var(--accent-dim);
+  opacity: 0;
+  transition: opacity 0.25s;
+}
+.task-card:hover {
+  border-color: var(--accent);
+  box-shadow: var(--glow-sm);
+  transform: translateY(-2px);
+}
+.task-card:hover::before { opacity: 1; background: var(--accent); }
+.task-card-header { display: flex; align-items: flex-start; gap: 8px; margin-bottom: 8px; }
+.task-card-name { font-family: var(--display); font-weight: 600; font-size: 0.95rem; flex: 1; }
+.task-card-meta { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 10px; }
+.task-card-size { font-family: var(--mono); font-size: 0.72rem; color: var(--text-muted); }
+.task-card-actions { display: flex; gap: 8px; margin-top: 14px; }
+
+/* ── Buttons ── */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 14px;
+  border-radius: var(--radius);
+  font-family: var(--mono);
+  font-size: 0.75rem;
+  cursor: pointer;
+  border: 1px solid var(--border);
+  background: var(--surface2);
+  color: var(--text);
+  transition: all 0.2s;
+  text-decoration: none;
+  letter-spacing: 0.02em;
+}
+.btn:hover {
+  background: var(--surface3);
+  border-color: var(--accent);
+  color: var(--accent);
+  text-decoration: none;
+  box-shadow: var(--glow-sm);
+}
+.btn-primary {
+  background: linear-gradient(135deg, var(--accent2) 0%, var(--accent-dim) 100%);
+  border-color: var(--accent);
+  color: white;
+}
+.btn-primary:hover {
+  background: var(--accent2);
+  color: white;
+  box-shadow: var(--glow-md);
+}
+
+/* ── Run header ── */
+.run-header {
+  background: linear-gradient(135deg, var(--surface) 0%, var(--surface2) 100%);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 24px;
+  margin-bottom: 24px;
+  position: relative;
+  overflow: hidden;
+  animation: stagger-in 0.5s ease-out;
+}
+.run-header::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 200px;
+  height: 200px;
+  background: radial-gradient(circle, rgba(139, 92, 246, 0.06) 0%, transparent 70%);
+  pointer-events: none;
+}
+.run-header h2 { font-family: var(--display); font-size: 1.2rem; margin-bottom: 8px; font-weight: 600; letter-spacing: -0.01em; }
+.run-header-meta { display: flex; flex-wrap: wrap; gap: 12px; font-size: 0.85rem; color: var(--text-muted); }
+
+/* ── Output view ── */
+.output-toolbar { display: flex; gap: 8px; margin-bottom: 16px; align-items: center; }
+.output-container {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 28px;
+  animation: stagger-in 0.4s ease-out;
+}
+.output-container h1, .output-container h2, .output-container h3, .output-container h4 { color: var(--text); margin-top: 1.5em; margin-bottom: 0.5em; font-family: var(--display); }
+.output-container h1 { font-size: 1.4rem; border-bottom: 1px solid var(--border); padding-bottom: 10px; letter-spacing: -0.01em; }
+.output-container h2 { font-size: 1.15rem; }
+.output-container h3 { font-size: 1rem; color: var(--text-muted); }
+.output-container p { margin: 0.5em 0; }
+.output-container ul, .output-container ol { margin: 0.5em 0; padding-left: 1.5em; }
+.output-container li { margin: 0.3em 0; }
+.output-container code { font-family: var(--mono); font-size: 0.85em; background: var(--surface2); padding: 2px 6px; border-radius: 4px; color: var(--cyan); }
+.output-container pre { background: var(--surface2); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; overflow-x: auto; margin: 1em 0; position: relative; }
+.output-container pre code { background: transparent; padding: 0; font-size: 0.8rem; line-height: 1.5; color: var(--text); }
+.output-container table { border-collapse: collapse; width: 100%; margin: 1em 0; font-size: 0.85rem; }
+.output-container th, .output-container td { border: 1px solid var(--border); padding: 8px 12px; text-align: left; }
+.output-container th { background: var(--surface2); font-weight: 600; color: var(--text-muted); font-family: var(--mono); font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.04em; }
+.output-container blockquote { border-left: 3px solid var(--accent); padding-left: 14px; color: var(--text-muted); margin: 1em 0; background: rgba(139, 92, 246, 0.03); padding: 10px 14px; border-radius: 0 var(--radius) var(--radius) 0; }
+.output-container hr { border: none; border-top: 1px solid var(--border); margin: 1.5em 0; }
+.output-container strong { color: var(--text); }
+.output-container a { color: var(--accent); }
+
+/* ── Copy button ── */
+.copy-btn { position: absolute; top: 8px; right: 8px; padding: 4px 10px; font-size: 0.65rem; background: var(--surface3); border: 1px solid var(--border); color: var(--text-muted); border-radius: 4px; cursor: pointer; font-family: var(--mono); opacity: 0; transition: all 0.2s; }
+pre:hover .copy-btn { opacity: 1; }
+.copy-btn:hover { background: var(--accent2); color: white; border-color: var(--accent); box-shadow: var(--glow-sm); }
+.copy-btn.copied { background: var(--green-dim); color: var(--green); border-color: var(--green); }
+
+/* ── Collapsible sections ── */
+.collapsible { border: 1px solid var(--border); border-radius: var(--radius); margin: 12px 0; overflow: hidden; }
+.collapsible > summary { cursor: pointer; padding: 12px 16px; background: var(--surface2); font-family: var(--display); font-weight: 600; font-size: 0.95rem; list-style: none; display: flex; align-items: center; gap: 8px; transition: background 0.2s; }
+.collapsible > summary::before { content: '▸'; color: var(--accent-dim); font-family: var(--mono); font-size: 0.8rem; transition: transform 0.2s, color 0.2s; }
+.collapsible[open] > summary::before { transform: rotate(90deg); color: var(--accent); }
+.collapsible > summary:hover { background: var(--surface3); }
+.collapsible > .section-content { padding: 16px; }
+
+/* ── Timeline — Diagonal accent line ── */
+.timeline { position: relative; padding-left: 36px; }
+.timeline::before {
+  content: '';
+  position: absolute;
+  left: 12px;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: linear-gradient(180deg, var(--accent-dim), var(--border) 30%, var(--border) 70%, var(--accent-dim));
+}
+.tl-event { position: relative; margin-bottom: 12px; }
+.tl-dot { position: absolute; left: -30px; top: 8px; width: 12px; height: 12px; border-radius: 50%; border: 2px solid var(--border); background: var(--surface); transition: all 0.2s; }
+.tl-event.tl-init .tl-dot { background: var(--accent); border-color: var(--accent); box-shadow: 0 0 8px rgba(196, 161, 255, 0.4); }
+.tl-event.tl-tool .tl-dot { background: var(--blue); border-color: var(--blue); box-shadow: 0 0 8px rgba(96, 165, 250, 0.3); }
+.tl-event.tl-thinking .tl-dot { background: var(--yellow); border-color: var(--yellow); box-shadow: 0 0 8px rgba(251, 191, 36, 0.3); }
+.tl-event.tl-text .tl-dot { background: var(--green); border-color: var(--green); box-shadow: 0 0 8px rgba(52, 211, 153, 0.3); }
+.tl-event.tl-progress .tl-dot { width: 6px; height: 6px; left: -27px; top: 10px; background: var(--text-dim); border: none; }
+.tl-event.tl-notification .tl-dot { background: var(--orange); border-color: var(--orange); box-shadow: 0 0 8px rgba(251, 146, 60, 0.3); }
+
+.tl-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; transition: border-color 0.2s; }
+.tl-card:hover { border-color: var(--border-light); }
+.tl-card-header { padding: 10px 14px; display: flex; align-items: center; gap: 8px; font-family: var(--mono); font-size: 0.8rem; cursor: pointer; transition: background 0.15s; }
+.tl-card-header:hover { background: var(--surface2); }
+.tl-card-body { padding: 14px; border-top: 1px solid var(--border); font-family: var(--mono); font-size: 0.75rem; max-height: 300px; overflow: auto; white-space: pre-wrap; word-break: break-word; color: var(--text-muted); background: var(--surface2); }
+.tl-tool-icon { font-size: 0.9rem; }
+.tl-tool-name { font-weight: 600; color: var(--cyan); }
+.tl-tool-summary { color: var(--text-muted); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tl-compact { font-family: var(--mono); font-size: 0.75rem; color: var(--text-dim); padding: 2px 0; }
+.tl-meta {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 16px 20px;
+  margin-bottom: 20px;
+  display: flex;
+  gap: 24px;
+  flex-wrap: wrap;
+  font-family: var(--mono);
+  font-size: 0.8rem;
+  animation: stagger-in 0.4s ease-out;
+}
+.tl-meta-item { display: flex; flex-direction: column; gap: 2px; }
+.tl-meta-label { color: var(--text-dim); font-size: 0.65rem; text-transform: uppercase; letter-spacing: 0.06em; }
+.tl-meta-value { color: var(--text); font-weight: 600; }
+
+/* ── Config screen ── */
+.config-header { display: flex; align-items: center; gap: 12px; margin-bottom: 20px; flex-wrap: wrap; animation: stagger-in 0.4s ease-out; }
+.config-tabs { display: flex; gap: 0; border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
+.config-tab { padding: 10px 20px; font-family: var(--mono); font-size: 0.78rem; cursor: pointer; background: var(--surface); color: var(--text-muted); border: none; border-right: 1px solid var(--border); transition: all 0.2s; letter-spacing: 0.02em; }
+.config-tab:last-child { border-right: none; }
+.config-tab:hover { background: var(--surface2); color: var(--text); }
+.config-tab.active { background: var(--accent2); color: white; box-shadow: var(--glow-sm); }
+.scope-toggle { display: flex; align-items: center; gap: 8px; margin-left: auto; font-family: var(--mono); font-size: 0.75rem; color: var(--text-muted); }
+.scope-toggle select { background: var(--surface); border: 1px solid var(--border); color: var(--text); padding: 5px 10px; border-radius: var(--radius); font-family: var(--mono); font-size: 0.75rem; cursor: pointer; }
+.config-toolbar { display: flex; align-items: center; gap: 8px; margin-bottom: 16px; }
+.config-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 14px; }
+.config-card {
+  background: linear-gradient(135deg, var(--surface) 0%, var(--surface2) 100%);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 18px;
+  transition: border-color 0.25s, box-shadow 0.25s, transform 0.2s;
+  display: flex;
+  flex-direction: column;
+}
+.config-card:hover { border-color: var(--accent-dim); box-shadow: var(--glow-sm); transform: translateY(-1px); }
+.config-card-header { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.config-card-name { font-family: var(--mono); font-weight: 600; font-size: 0.9rem; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.config-card-desc { font-size: 0.8rem; color: var(--text-muted); line-height: 1.4; margin-bottom: 10px; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.config-card-actions { display: flex; gap: 6px; margin-top: auto; padding-top: 10px; }
+.badge-scope { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 0.65rem; font-weight: 700; font-family: var(--mono); letter-spacing: 0.04em; }
+.badge-global { background: rgba(30, 58, 95, 0.5); color: var(--blue); border: 1px solid rgba(96, 165, 250, 0.2); }
+.badge-project { background: rgba(59, 7, 100, 0.5); color: #c084fc; border: 1px solid rgba(139, 92, 246, 0.2); }
+.btn-danger { background: var(--red-dim); border-color: rgba(248, 113, 113, 0.3); color: var(--red); }
+.btn-danger:hover { background: #991b1b; border-color: var(--red); color: white; box-shadow: 0 0 12px rgba(248, 113, 113, 0.15); }
+.btn-sm { padding: 5px 12px; font-size: 0.7rem; }
+
+/* ── Modal ── */
+.modal-overlay { position: fixed; inset: 0; background: rgba(7, 7, 10, 0.85); backdrop-filter: blur(8px); z-index: 200; display: flex; align-items: center; justify-content: center; padding: 20px; }
+.modal {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  width: 100%;
+  max-width: 700px;
+  max-height: 85vh;
+  display: flex;
+  flex-direction: column;
+  box-shadow: var(--glow-lg);
+  animation: stagger-in 0.3s ease-out;
+}
+.modal-header { display: flex; align-items: center; gap: 12px; padding: 18px 24px; border-bottom: 1px solid var(--border); }
+.modal-header h3 { font-family: var(--display); font-size: 1rem; margin: 0; flex: 1; font-weight: 600; }
+.modal-close { background: none; border: none; color: var(--text-muted); font-size: 1.2rem; cursor: pointer; padding: 4px 8px; transition: color 0.2s; }
+.modal-close:hover { color: var(--red); }
+.modal-body { padding: 24px; overflow-y: auto; flex: 1; }
+.modal-footer { display: flex; justify-content: flex-end; gap: 8px; padding: 14px 24px; border-top: 1px solid var(--border); }
+.form-group { margin-bottom: 16px; }
+.form-label { display: block; font-family: var(--mono); font-size: 0.7rem; color: var(--text-dim); margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.06em; }
+.form-input { width: 100%; background: var(--surface2); border: 1px solid var(--border); color: var(--text); padding: 10px 14px; border-radius: var(--radius); font-family: var(--mono); font-size: 0.85rem; outline: none; box-sizing: border-box; transition: border-color 0.2s, box-shadow 0.2s; }
+.form-input:focus { border-color: var(--accent); box-shadow: var(--glow-sm); }
+.form-textarea { width: 100%; min-height: 300px; background: var(--surface2); border: 1px solid var(--border); color: var(--text); padding: 14px; border-radius: var(--radius); font-family: var(--mono); font-size: 0.8rem; line-height: 1.5; resize: vertical; outline: none; box-sizing: border-box; transition: border-color 0.2s, box-shadow 0.2s; }
+.form-textarea:focus { border-color: var(--accent); box-shadow: var(--glow-sm); }
+.config-empty { text-align: center; color: var(--text-muted); padding: 48px; font-family: var(--mono); font-size: 0.85rem; }
+.hook-card-name { font-family: var(--display); font-weight: 700; font-size: 1rem; margin-bottom: 6px; text-transform: capitalize; }
+.hook-card-desc { font-size: 0.85rem; color: var(--text-muted); }
+
+
+
+/* ── Pipeline view ── */
+.pipeline-header {
+  background: linear-gradient(135deg, var(--surface) 0%, var(--surface2) 100%);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 24px;
+  margin-bottom: 24px;
+  position: relative;
+  overflow: hidden;
+  animation: stagger-in 0.5s ease-out;
+}
+.pipeline-header::after {
+  content: '';
+  position: absolute;
+  top: -50%;
+  right: -10%;
+  width: 300px;
+  height: 300px;
+  background: radial-gradient(circle, rgba(34, 211, 238, 0.04) 0%, transparent 70%);
+  pointer-events: none;
+}
+.pipeline-header h2 { font-family: var(--display); font-size: 1.2rem; margin-bottom: 8px; font-weight: 600; letter-spacing: -0.01em; }
+.pipeline-meta { display: flex; flex-wrap: wrap; gap: 12px; font-size: 0.85rem; color: var(--text-muted); }
+
+/* ── Train visualization — Glowing cars ── */
+.train-container { display: flex; align-items: center; overflow-x: auto; padding: 28px 0 36px; gap: 0; }
+.train-car {
+  background: linear-gradient(135deg, var(--surface) 0%, var(--surface2) 100%);
+  border: 2px solid var(--border);
+  border-radius: 12px;
+  padding: 18px 22px;
+  min-width: 210px;
+  max-width: 290px;
+  flex-shrink: 0;
+  cursor: pointer;
+  transition: border-color 0.25s, box-shadow 0.25s, transform 0.2s;
+  position: relative;
+  overflow: hidden;
+}
+.train-car::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: transparent;
+  transition: background 0.3s;
+}
+.train-car:hover { border-color: var(--accent); transform: translateY(-3px); box-shadow: var(--glow-md); }
+.train-car:hover::before { background: var(--accent); }
+.train-car.selected { border-color: var(--accent); box-shadow: var(--glow-md); }
+.train-car.selected::before { background: var(--accent); }
+.train-car.pending { border-color: var(--text-dim); }
+.train-car.running { border-color: var(--yellow); animation: train-pulse 2s ease-in-out infinite; }
+.train-car.running::before { background: var(--yellow); }
+.train-car.done { border-color: var(--green); }
+.train-car.done::before { background: var(--green); }
+.train-car.failed { border-color: var(--red); }
+.train-car.failed::before { background: var(--red); }
+@keyframes train-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(251, 191, 36, 0); border-color: var(--yellow); }
+  50% { box-shadow: 0 0 20px 4px rgba(251, 191, 36, 0.15); border-color: #fcd34d; }
+}
+.train-car-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
+.train-car-num { font-family: var(--mono); font-size: 0.6rem; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.08em; }
+.train-car-name { font-family: var(--display); font-weight: 600; font-size: 0.95rem; margin-bottom: 8px; color: var(--text); }
+.train-car-stats { display: flex; gap: 10px; font-family: var(--mono); font-size: 0.72rem; color: var(--text-muted); }
+.train-car-stats span { display: flex; align-items: center; gap: 3px; }
+.train-car-expand { font-family: var(--mono); font-size: 0.62rem; color: var(--text-dim); margin-top: 8px; transition: color 0.2s; text-transform: uppercase; letter-spacing: 0.04em; }
+.train-car:hover .train-car-expand { color: var(--accent); }
+
+.train-connector { display: flex; align-items: center; flex-shrink: 0; width: 44px; position: relative; }
+.train-connector-line { width: 100%; height: 2px; background: var(--border); position: relative; transition: background 0.3s; }
+.train-connector-arrow { position: absolute; right: -1px; top: 50%; transform: translateY(-50%); width: 0; height: 0; border-top: 5px solid transparent; border-bottom: 5px solid transparent; border-left: 8px solid var(--border); transition: border-left-color 0.3s; }
+.train-connector.active .train-connector-line { background: var(--green); box-shadow: 0 0 8px rgba(52, 211, 153, 0.3); }
+.train-connector.active .train-connector-arrow { border-left-color: var(--green); }
+
+/* ── Train task breakdown panel ── */
+.train-tasks-panel { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); margin-top: 20px; overflow: hidden; animation: slide-down 0.25s ease-out; }
+@keyframes slide-down { from { opacity: 0; transform: translateY(-10px); } to { opacity: 1; transform: translateY(0); } }
+.train-tasks-header { display: flex; align-items: center; gap: 10px; padding: 12px 16px; border-bottom: 1px solid var(--border); }
+.train-tasks-header h3 { font-family: var(--mono); font-size: 0.85rem; margin: 0; }
+.train-tasks-list { padding: 4px 0; }
+.train-task-row { display: flex; align-items: center; gap: 10px; padding: 8px 16px; font-family: var(--mono); font-size: 0.8rem; border-bottom: 1px solid var(--border); transition: background 0.1s; cursor: pointer; }
+.train-task-row:last-child { border-bottom: none; }
+.train-task-row:hover { background: var(--surface2); }
+.train-task-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); }
+.train-task-cost { color: var(--text-dim); font-size: 0.75rem; }
+.train-task-link { color: var(--accent); font-size: 0.75rem; white-space: nowrap; }
+
+/* Pipeline summary card */
+.pipeline-summary-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); overflow: hidden; animation: slide-down 0.25s ease-out; }
+.pipeline-summary-header { display: flex; align-items: center; gap: 10px; padding: 12px 16px; border-bottom: 1px solid var(--border); }
+.pipeline-summary-header h3 { font-family: var(--mono); font-size: 0.85rem; }
+.pipeline-summary-body { padding: 16px; font-size: 0.85rem; line-height: 1.6; }
+.pipeline-summary-body h2 { font-family: var(--display); font-size: 1rem; font-weight: 600; color: var(--accent); margin: 20px 0 8px 0; padding-bottom: 4px; border-bottom: 1px solid var(--border); }
+.pipeline-summary-body h2:first-child { margin-top: 0; }
+.pipeline-summary-body h3 { font-family: var(--mono); font-size: 0.85rem; font-weight: 600; color: var(--text); margin: 16px 0 6px 0; }
+.pipeline-summary-body ul { margin: 6px 0; padding-left: 20px; }
+.pipeline-summary-body li { margin-bottom: 4px; }
+.pipeline-summary-body strong { color: var(--text); }
+.pipeline-summary-body p { margin: 6px 0; }
+.pipeline-summary-body pre { background: var(--surface2); border: 1px solid var(--border); border-radius: var(--radius); padding: 10px; overflow-x: auto; font-size: 0.8rem; }
+#generate-summary-btn:disabled { opacity: 0.6; cursor: wait; }
+
+/* Legacy pipeline styles kept for list view */
+.pipeline-flow { display: flex; align-items: flex-start; gap: 0; overflow-x: auto; padding: 16px 0 24px; }
+.pipeline-stage-wrap { display: flex; align-items: flex-start; }
+.pipeline-arrow { color: var(--text-dim); font-size: 1.4rem; padding: 0 6px; flex-shrink: 0; align-self: center; margin-bottom: 20px; }
+
+.pipelines-section { margin-bottom: 28px; }
+.section-title { font-family: var(--mono); font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-dim); margin-bottom: 12px; padding-bottom: 8px; border-bottom: 1px solid var(--border); }
+.pipeline-list-table { width: 100%; border-collapse: collapse; margin-bottom: 8px; }
+.pipeline-list-table th { text-align: left; padding: 10px 14px; color: var(--text-dim); font-family: var(--mono); font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.08em; border-bottom: 1px solid var(--border); font-weight: 500; }
+.pipeline-list-table td { padding: 10px 12px; border-bottom: 1px solid var(--border); font-family: var(--mono); font-size: 0.85rem; }
+.pipeline-list-table tr { cursor: pointer; transition: background 0.15s; }
+.pipeline-list-table tr:hover { background: var(--surface2); }
+.stage-pills { display: flex; gap: 4px; flex-wrap: wrap; }
+.stage-pill { display: inline-block; padding: 1px 6px; border-radius: 3px; font-size: 0.7rem; font-weight: 600; }
+.stage-pill-pending { background: var(--surface3); color: var(--text-dim); }
+.stage-pill-running { background: #422006; color: #fcd34d; animation: pulse 2s infinite; }
+.stage-pill-done { background: #14532d; color: #86efac; }
+.stage-pill-failed { background: #7f1d1d; color: #fca5a5; }
+
+/* ── Workspace — Diagonal offset layout ── */
+.ws-top { display: flex; gap: 14px; margin-bottom: 24px; align-items: flex-end; animation: stagger-in 0.4s ease-out; }
+.ws-layout { display: flex; gap: 24px; }
+.ws-main { flex: 1; min-width: 0; }
+.ws-sidebar { width: 400px; flex-shrink: 0; display: flex; flex-direction: column; gap: 18px; /* Diagonal offset */ margin-top: 32px; }
+@media (max-width: 1100px) { .ws-layout { flex-direction: column; } .ws-sidebar { width: 100%; margin-top: 0; } }
+.ws-select { flex: 1; }
+.ws-select label { display: block; font-family: var(--mono); font-size: 0.75rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 4px; }
+.ws-select select, .ws-select input[type="text"] { width: 100%; background: var(--surface); border: 1px solid var(--border); color: var(--text); padding: 10px 14px; border-radius: var(--radius); font-family: var(--mono); font-size: 0.85rem; outline: none; transition: border-color 0.2s, box-shadow 0.2s; }
+.ws-select select:focus, .ws-select input[type="text"]:focus { border-color: var(--accent); box-shadow: var(--glow-sm); }
+.ws-file-tabs { display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 16px; }
+.ws-file-tab { font-family: var(--mono); font-size: 0.72rem; padding: 6px 12px; border-radius: var(--radius); cursor: pointer; border: 1px solid var(--border); background: var(--surface); color: var(--text-muted); transition: all 0.2s; letter-spacing: 0.02em; }
+.ws-file-tab:hover { border-color: var(--accent); color: var(--text); box-shadow: var(--glow-sm); }
+.ws-file-tab.active { background: var(--accent2); border-color: var(--accent); color: white; box-shadow: var(--glow-sm); }
+.ws-file-tab .file-count { font-size: 0.65rem; opacity: 0.7; margin-left: 4px; }
+.ws-task-card {
+  background: linear-gradient(135deg, var(--surface) 0%, var(--surface2) 100%);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px;
+  transition: border-color 0.25s, box-shadow 0.25s, transform 0.2s;
+}
+.ws-task-card:hover { border-color: var(--accent-dim); box-shadow: var(--glow-sm); transform: translateY(-1px); }
+.ws-task-header { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.ws-task-name { font-weight: 600; font-size: 0.9rem; flex: 1; }
+.ws-task-tags { display: flex; flex-wrap: wrap; gap: 3px; margin-bottom: 10px; }
+.ws-task-tags .tag-agent { background: #1e3a5f; color: #93c5fd; border-color: #3b82f640; }
+.ws-task-tags .tag-skill { background: #3b0764; color: #c084fc; border-color: #7c3aed40; }
+.ws-task-prompt { font-family: var(--mono); font-size: 0.75rem; color: var(--text-muted); max-height: 40px; overflow: hidden; text-overflow: ellipsis; margin-bottom: 10px; white-space: nowrap; }
+.ws-task-actions { display: flex; gap: 6px; }
+.btn-success { border-color: rgba(52, 211, 153, 0.3); color: var(--green); }
+.btn-success:hover { background: var(--green-dim); border-color: var(--green); color: var(--green); box-shadow: 0 0 12px rgba(52, 211, 153, 0.1); }
+/* ── Brainstorm panel ── */
+.ws-brainstorm {
+  background: linear-gradient(135deg, var(--surface) 0%, var(--surface2) 100%);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 18px;
+  margin-bottom: 20px;
+  position: relative;
+  overflow: hidden;
+}
+.ws-brainstorm::before {
+  content: '';
+  position: absolute;
+  top: -50px;
+  right: -50px;
+  width: 150px;
+  height: 150px;
+  background: radial-gradient(circle, rgba(139, 92, 246, 0.06) 0%, transparent 70%);
+  pointer-events: none;
+}
+.ws-brainstorm h3 { margin: 0 0 14px 0; font-family: var(--display); font-size: 1rem; color: var(--text); font-weight: 600; }
+.ws-brainstorm-row { display: flex; gap: 12px; align-items: center; }
+.ws-brainstorm-row select { padding: 8px 12px; border-radius: 4px; border: 1px solid var(--border); background: var(--bg); color: var(--text); }
+/* Tasks.md editor */
+#ws-tasks-md-container { margin-top: 16px; border-top: 1px solid var(--border); padding-top: 16px; }
+.ws-tasks-md-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+#ws-tasks-md { width: 100%; min-height: 200px; max-height: 400px; font-family: var(--mono); font-size: 0.8rem; padding: 12px; border: 1px solid var(--border); border-radius: 4px; background: var(--bg); color: var(--text); resize: vertical; }
+.ws-tasks-md-actions { display: flex; gap: 8px; margin-top: 8px; }
+.ws-brainstorm.loading button { opacity: 0.6; pointer-events: none; }
+.ws-progress { font-family: var(--mono); font-size: 0.75rem; color: var(--accent); padding: 6px 0 0; min-height: 18px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ws-brainstorm-mode-fields { margin-top: 10px; display: flex; flex-direction: column; gap: 8px; }
+.ws-brainstorm-mode-fields input { background: var(--bg); border: 1px solid var(--border); color: var(--text); padding: 8px 12px; border-radius: 4px; font-family: var(--mono); font-size: 0.8rem; outline: none; width: 100%; }
+.ws-brainstorm-mode-fields input:focus { border-color: var(--accent); }
+.ws-brainstorm-mode-fields label { font-size: 0.75rem; color: var(--text-muted); margin-bottom: 2px; }
+.ws-repo-pipelines { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 16px; margin-bottom: 20px; }
+.ws-repo-pipelines h3 { margin: 0 0 12px 0; font-size: 1rem; color: var(--text); }
+.ws-pipeline-list { display: flex; flex-direction: column; gap: 8px; }
+.ws-pipeline-item { display: flex; align-items: center; gap: 12px; padding: 10px 12px; background: var(--bg); border-radius: 4px; }
+.ws-pipeline-name { font-family: var(--mono); font-size: 0.85rem; flex: 1; }
+.ws-pipeline-stages { font-size: 0.75rem; color: var(--text-muted); }
+.ws-empty { text-align: center; color: var(--text-muted); padding: 40px; font-family: var(--mono); font-size: 0.85rem; }
+/* ── Active runs panel ── */
+.ws-active-runs {
+  background: linear-gradient(135deg, var(--surface) 0%, var(--surface2) 100%);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 18px;
+  margin-bottom: 20px;
+}
+.ws-active-runs h3 { margin: 0 0 14px 0; font-family: var(--display); font-size: 1rem; color: var(--text); font-weight: 600; }
+.ws-run-row { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 6px; background: var(--bg); border: 1px solid var(--border); margin-bottom: 6px; font-family: var(--mono); font-size: 0.8rem; }
+.ws-run-spinner { width: 14px; height: 14px; border: 2px solid var(--yellow-dim); border-top-color: var(--yellow); border-radius: 50%; animation: spin 0.8s linear infinite; flex-shrink: 0; }
+.ws-run-name { flex: 1; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ws-run-id { color: var(--text-muted); font-size: 0.72rem; }
+.ws-run-elapsed { color: var(--text-muted); white-space: nowrap; }
+.ws-run-link { color: var(--accent); text-decoration: none; font-size: 0.75rem; white-space: nowrap; }
+.ws-run-link:hover { text-decoration: underline; }
+.ws-no-runs { color: var(--text-muted); font-family: var(--mono); font-size: 0.8rem; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.ws-section-title { font-family: var(--mono); font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-dim); margin-bottom: 12px; display: flex; align-items: center; gap: 8px; }
+.ws-checks { display: flex; flex-wrap: wrap; gap: 6px; max-height: 140px; overflow-y: auto; padding: 4px; }
+.ws-check { display: flex; align-items: center; gap: 4px; font-family: var(--mono); font-size: 0.72rem; color: var(--text-muted); cursor: pointer; padding: 4px 8px; border-radius: 4px; border: 1px solid var(--border); background: var(--surface); transition: all 0.2s; user-select: none; }
+.ws-check:hover { border-color: var(--accent); box-shadow: var(--glow-sm); }
+.ws-check input { accent-color: var(--accent); }
+.ws-check.checked { background: var(--surface3); border-color: var(--accent); color: var(--text); }
+/* Pipeline Guide section */
+.ws-pipeline-guide { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 16px; margin-bottom: 20px; }
+.ws-pipeline-guide h3 { margin: 0 0 12px 0; font-size: 1rem; color: var(--text); }
+.ws-pipeline-guide details summary { font-family: var(--mono); font-size: 0.85rem; color: var(--accent); cursor: pointer; user-select: none; padding: 4px 0; }
+.ws-pipeline-guide details summary:hover { color: var(--text); }
+.pipeline-docs { margin-top: 12px; padding: 12px; background: var(--bg); border: 1px solid var(--border); border-radius: 4px; font-family: var(--mono); font-size: 0.78rem; color: var(--text-muted); line-height: 1.6; white-space: pre-wrap; max-height: 320px; overflow-y: auto; }
+.pipeline-docs table { border-collapse: collapse; width: 100%; margin: 8px 0; }
+.pipeline-docs th, .pipeline-docs td { border: 1px solid var(--border); padding: 4px 8px; text-align: left; font-size: 0.75rem; }
+.pipeline-docs th { color: var(--text); background: var(--surface2); }
+.pipeline-templates { display: flex; align-items: center; gap: 10px; margin-top: 14px; flex-wrap: wrap; }
+.pipeline-templates label { font-family: var(--mono); font-size: 0.75rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; white-space: nowrap; }
+.pipeline-templates select { flex: 1; min-width: 180px; background: var(--surface); border: 1px solid var(--border); color: var(--text); padding: 7px 10px; border-radius: var(--radius); font-family: var(--mono); font-size: 0.82rem; outline: none; }
+.pipeline-templates select:focus { border-color: var(--accent); }
+
+/* ── Workspace sections ── */
+.ws-section {
+  background: linear-gradient(135deg, var(--surface) 0%, var(--surface2) 100%);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 18px;
+  margin-bottom: 20px;
+}
+
+.ws-section h3 {
+  margin: 0 0 14px 0;
+  font-family: var(--display);
+  font-size: 1rem;
+  color: var(--text);
+  font-weight: 600;
+}
+
+.ws-active-run {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 12px;
+  background: var(--bg);
+  border-radius: 4px;
+  margin-bottom: 8px;
+}
+
+.ws-active-run .spinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid var(--border);
+  border-top-color: var(--blue);
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.ws-pipeline-guide details {
+  margin-bottom: 12px;
+}
+
+.ws-pipeline-guide summary {
+  cursor: pointer;
+  color: var(--blue);
+}
+
+.ws-pipeline-guide pre {
+  background: var(--bg);
+  padding: 12px;
+  border-radius: 4px;
+  overflow-x: auto;
+  font-size: 0.8rem;
+}
+
+.runs-filter {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 18px;
+}
+.runs-filter label { color: var(--text-muted); font-family: var(--mono); font-size: 0.75rem; white-space: nowrap; letter-spacing: 0.04em; text-transform: uppercase; }
+.runs-filter select { background: var(--surface); border: 1px solid var(--border); color: var(--text); padding: 8px 12px; border-radius: var(--radius); font-family: var(--mono); font-size: 0.82rem; outline: none; flex: 1; max-width: 360px; transition: border-color 0.2s, box-shadow 0.2s; }
+.runs-filter select:focus { border-color: var(--accent); box-shadow: var(--glow-sm); }
+
+/* ── Pipeline Mapper ── */
+.mapper-setup {
+  background: linear-gradient(135deg, var(--surface) 0%, var(--surface2) 100%);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 24px;
+  margin-bottom: 24px;
+  animation: stagger-in 0.4s ease-out;
+}
+.mapper-setup h3 { font-family: var(--display); font-size: 1.1rem; margin-bottom: 16px; font-weight: 600; }
+.mapper-setup-row { display: flex; gap: 12px; align-items: flex-end; flex-wrap: wrap; }
+.mapper-setup-field { flex: 1; min-width: 200px; }
+.mapper-setup-field label { display: block; font-family: var(--mono); font-size: 0.75rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 4px; }
+.mapper-setup-field select { width: 100%; background: var(--surface2); border: 1px solid var(--border); color: var(--text); padding: 8px 12px; border-radius: var(--radius); font-family: var(--mono); font-size: 0.85rem; outline: none; }
+.mapper-setup-field select:focus { border-color: var(--accent); }
+.mapper-tasks-files { display: flex; gap: 8px; align-items: center; }
+.mapper-tasks-files select { flex: 1; }
+.mapper-selected-files { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.mapper-file-tag { display: inline-flex; align-items: center; gap: 6px; background: var(--surface2); border: 1px solid var(--border-light); border-radius: 4px; padding: 4px 10px; font-family: var(--mono); font-size: 0.75rem; color: var(--text); }
+.mapper-file-remove { background: none; border: none; color: var(--text-muted); cursor: pointer; font-size: 1rem; line-height: 1; padding: 0 2px; }
+.mapper-file-remove:hover { color: var(--red); }
+
+.mapper-columns { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin-bottom: 24px; min-height: 300px; }
+@media (max-width: 768px) { .mapper-columns { grid-template-columns: 1fr; } }
+.mapper-col {
+  background: linear-gradient(135deg, var(--surface) 0%, var(--surface2) 100%);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 18px;
+  display: flex;
+  flex-direction: column;
+}
+.mapper-col-header { font-family: var(--mono); font-size: 0.78rem; font-weight: 600; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 14px; display: flex; align-items: center; gap: 8px; }
+.mapper-col-header .count { font-weight: 400; font-size: 0.72rem; color: var(--text-dim); }
+
+.mapper-task { background: var(--surface2); border: 1px solid var(--border); border-radius: var(--radius); padding: 12px 14px; margin-bottom: 8px; cursor: grab; transition: border-color 0.2s, opacity 0.2s, box-shadow 0.2s, transform 0.15s; user-select: none; }
+.mapper-task:hover { border-color: var(--accent); box-shadow: var(--glow-sm); transform: translateX(2px); }
+.mapper-task.dragging { opacity: 0.4; }
+.mapper-task.mapped-ghost { opacity: 0.4; cursor: default; border-style: dashed; }
+.mapper-task.executed { border-left: 3px solid var(--green); }
+.mapper-task-header { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; }
+.mapper-task-name { font-weight: 600; font-size: 0.85rem; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mapper-task-meta { display: flex; flex-wrap: wrap; gap: 4px; }
+.mapper-task-remove { background: none; border: none; color: var(--text-dim); cursor: pointer; font-size: 1rem; padding: 0 4px; line-height: 1; transition: color 0.15s; }
+.mapper-task-remove:hover { color: var(--red); }
+
+.mapper-stage { margin-bottom: 16px; }
+.mapper-stage-header { font-family: var(--mono); font-size: 0.8rem; font-weight: 600; color: var(--text); margin-bottom: 8px; display: flex; align-items: center; gap: 8px; }
+.mapper-stage-header .stage-num { color: var(--text-dim); font-size: 0.7rem; text-transform: uppercase; }
+.mapper-drop-zone { min-height: 48px; border: 2px dashed var(--border); border-radius: var(--radius); padding: 8px; transition: border-color 0.2s, background 0.2s, box-shadow 0.2s; }
+.mapper-drop-zone.drag-over { border-color: var(--accent); background: rgba(139, 92, 246, 0.06); box-shadow: inset 0 0 16px rgba(139, 92, 246, 0.08); }
+.mapper-drop-zone-empty { display: flex; align-items: center; justify-content: center; min-height: 48px; color: var(--text-dim); font-family: var(--mono); font-size: 0.75rem; }
+
+.mapper-batch-bar {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 16px 24px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  position: sticky;
+  bottom: 16px;
+  z-index: 50;
+  box-shadow: 0 -8px 24px rgba(7, 7, 10, 0.6);
+  backdrop-filter: blur(12px);
+}
+.mapper-batch-info { font-family: var(--mono); font-size: 0.8rem; color: var(--text-muted); flex: 1; }
+.mapper-batch-info strong { color: var(--text); }
+
+.mapper-history { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); margin-top: 20px; overflow: hidden; }
+.mapper-history summary { cursor: pointer; padding: 12px 16px; font-family: var(--mono); font-size: 0.85rem; font-weight: 600; list-style: none; display: flex; align-items: center; gap: 8px; }
+.mapper-history summary::before { content: '▸'; color: var(--text-muted); font-size: 0.8rem; transition: transform 0.15s; }
+.mapper-history[open] summary::before { transform: rotate(90deg); }
+.mapper-history-list { padding: 0 16px 12px; }
+.mapper-history-item { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--border); font-family: var(--mono); font-size: 0.8rem; }
+.mapper-history-item:last-child { border-bottom: none; }
+.mapper-history-item a { color: var(--accent); }
+/* ── Responsive overrides ── */
+@media (max-width: 768px) {
+  main { padding: 16px; }
+  .task-grid { grid-template-columns: 1fr; }
+  .task-card:nth-child(7n+1) { grid-column: span 1; }
+  .config-grid { grid-template-columns: 1fr; }
+  header { padding: 0 16px; min-height: 48px; }
+  .tab-bar { padding: 0 16px; }
+  .tab-bar a { padding: 10px 14px; font-size: 0.72rem; }
+  .config-header { flex-direction: column; align-items: flex-start; }
+  .scope-toggle { margin-left: 0; }
+  .hero-title { font-size: 2.5rem !important; }
+}
+
+/* ── Selection & scrollbar ── */
+::selection { background: var(--accent2); color: white; }
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: var(--bg); }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--accent-dim); }
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">claude-orchestra</div>
+  <nav id="breadcrumb"></nav>
+  <div class="header-actions">
+    <a href="https://github.com/jarnura/claude-orchestra" target="_blank" rel="noopener noreferrer" class="github-link" title="View on GitHub">
+      <svg viewBox="0 0 24 24" fill="currentColor">
+        <path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/>
+      </svg>
+    </a>
+  </div>
+</header>
+<nav class="tab-bar" id="tab-bar">
+  <a href="#/runs">Runs</a>
+  <a href="#/config">Config</a>
+  <a href="#/workspace">Workspace</a>
+  <a href="#/pipelines">Pipelines</a>
+  <a href="#/mapper">Pipeline Mapper</a>
+</nav>
+<main id="app">
+  <div class="loading">Initializing...</div>
+</main>
+
+<script src="https://cdn.jsdelivr.net/npm/marked@14/marked.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/highlight.js@11/lib/core.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/highlight.js@11/lib/languages/rust.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/highlight.js@11/lib/languages/sql.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/highlight.js@11/lib/languages/bash.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/highlight.js@11/lib/languages/python.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/highlight.js@11/lib/languages/json.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/highlight.js@11/lib/languages/yaml.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/highlight.js@11/lib/languages/toml.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/highlight.js@11/lib/languages/css.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/highlight.js@11/lib/languages/xml.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/highlight.js@11/lib/languages/javascript.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/highlight.js@11/lib/languages/typescript.min.js"></script>
+<script>
+// Register languages
+if (window.hljs) {
+  ['rust','sql','bash','python','json','yaml','toml','css','xml','javascript','typescript'].forEach(l => {
+    try { /* already registered via script tags */ } catch(e) {}
+  });
+}
+
+// ── API Client ──
+const API_BASE = location.origin;
+const api = {
+  async getRuns() {
+    const r = await fetch(`${API_BASE}/api/runs`);
+    if (!r.ok) throw new Error(`Failed: ${r.status}`);
+    return r.json();
+  },
+  async getRun(id) {
+    const r = await fetch(`${API_BASE}/api/runs/${id}`);
+    if (!r.ok) throw new Error(`Failed: ${r.status}`);
+    return r.json();
+  },
+  async getOutput(runId, taskId) {
+    const r = await fetch(`${API_BASE}/api/runs/${runId}/${taskId}/output`);
+    if (!r.ok) throw new Error(`Failed: ${r.status}`);
+    return r.text();
+  },
+  async getStream(runId, taskId) {
+    const r = await fetch(`${API_BASE}/api/runs/${runId}/${taskId}/stream?summarize=1`);
+    if (!r.ok) throw new Error(`Failed: ${r.status}`);
+    return r.json();
+  },
+  async getVerify(runId, taskId) {
+    const r = await fetch(`${API_BASE}/api/runs/${runId}/${taskId}/verify`);
+    if (!r.ok) throw new Error(`Failed: ${r.status}`);
+    return r.json();
+  },
+  async getPipelines() {
+    const r = await fetch(`${API_BASE}/api/pipelines`);
+    if (!r.ok) throw new Error(`Failed: ${r.status}`);
+    return r.json();
+  },
+  async getPipeline(id) {
+    const r = await fetch(`${API_BASE}/api/pipeline/${id}`);
+    if (!r.ok) throw new Error(`Failed: ${r.status}`);
+    return r.json();
+  },
+  async getPipelineSummary(id) {
+    const r = await fetch(`${API_BASE}/api/pipeline/${id}/summary`);
+    if (!r.ok) throw new Error(`Failed: ${r.status}`);
+    return r.json();
+  },
+  async generatePipelineSummary(id) {
+    const r = await fetch(`${API_BASE}/api/pipeline/${id}/summary`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: '{}'
+    });
+    if (!r.ok) {
+      const err = await r.json().catch(() => ({ error: `HTTP ${r.status}` }));
+      throw new Error(err.error || `Failed: ${r.status}`);
+    }
+    return r.json();
+  },
+  // Config API
+  async getAgents() {
+    const r = await fetch(`${API_BASE}/api/config/agents`);
+    if (!r.ok) throw new Error(`Failed: ${r.status}`);
+    return r.json();
+  },
+  async getAgent(name) {
+    const r = await fetch(`${API_BASE}/api/config/agents/${encodeURIComponent(name)}`);
+    if (!r.ok) throw new Error(`Failed: ${r.status}`);
+    return r.json();
+  },
+  async putAgent(name, scope, content) {
+    const r = await fetch(`${API_BASE}/api/config/agents/${encodeURIComponent(name)}`, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ scope, content })
+    });
+    if (!r.ok) throw new Error(`Failed: ${r.status}`);
+    return r.json();
+  },
+  async deleteAgent(name) {
+    const r = await fetch(`${API_BASE}/api/config/agents/${encodeURIComponent(name)}`, { method: 'DELETE' });
+    if (!r.ok) throw new Error(`Failed: ${r.status}`);
+    return r.json();
+  },
+  async getSkills() {
+    const r = await fetch(`${API_BASE}/api/config/skills`);
+    if (!r.ok) throw new Error(`Failed: ${r.status}`);
+    return r.json();
+  },
+  async getSkill(name) {
+    const r = await fetch(`${API_BASE}/api/config/skills/${encodeURIComponent(name)}`);
+    if (!r.ok) throw new Error(`Failed: ${r.status}`);
+    return r.json();
+  },
+  async putSkill(name, scope, content) {
+    const r = await fetch(`${API_BASE}/api/config/skills/${encodeURIComponent(name)}`, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ scope, content })
+    });
+    if (!r.ok) throw new Error(`Failed: ${r.status}`);
+    return r.json();
+  },
+  async deleteSkill(name) {
+    const r = await fetch(`${API_BASE}/api/config/skills/${encodeURIComponent(name)}`, { method: 'DELETE' });
+    if (!r.ok) throw new Error(`Failed: ${r.status}`);
+    return r.json();
+  },
+  async getHooks() {
+    const r = await fetch(`${API_BASE}/api/config/hooks`);
+    if (!r.ok) throw new Error(`Failed: ${r.status}`);
+    return r.json();
+  },
+  // Workspace API
+  async getRepos() {
+    const r = await fetch(`${API_BASE}/api/workspace/repos`);
+    if (!r.ok) throw new Error(`Failed: ${r.status}`);
+    return r.json();
+  },
+  async getRepoTasks(repoPath) {
+    const r = await fetch(`${API_BASE}/api/workspace/repos/${encodeURIComponent(repoPath)}/tasks`);
+    if (!r.ok) throw new Error(`Failed: ${r.status}`);
+    return r.json();
+  },
+  async createTask(file, task) {
+    const r = await fetch(`${API_BASE}/api/workspace/tasks`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ file, task })
+    });
+    if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.error || `Failed: ${r.status}`); }
+    return r.json();
+  },
+  async updateTask(taskId, file, fields) {
+    const r = await fetch(`${API_BASE}/api/workspace/tasks/${encodeURIComponent(taskId)}?file=${encodeURIComponent(file)}`, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(fields)
+    });
+    if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.error || `Failed: ${r.status}`); }
+    return r.json();
+  },
+  async deleteTask(taskId, file) {
+    const r = await fetch(`${API_BASE}/api/workspace/tasks/${encodeURIComponent(taskId)}?file=${encodeURIComponent(file)}`, { method: 'DELETE' });
+    if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.error || `Failed: ${r.status}`); }
+    return r.json();
+  },
+  async runTask(taskId, file, repoPath) {
+    const r = await fetch(`${API_BASE}/api/workspace/tasks/${encodeURIComponent(taskId)}/run`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ file, repo_path: repoPath || '' })
+    });
+    if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.error || `Failed: ${r.status}`); }
+    return r.json();
+  },
+  // Brainstorm API
+  async brainstorm(repoPath, prompt, model = 'sonnet') {
+    const r = await fetch(`${API_BASE}/api/workspace/brainstorm`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ repo_path: repoPath, prompt, model })
+    });
+    if (!r.ok) throw new Error(`Brainstorm failed: ${r.statusText}`);
+    return r.json();
+  },
+  async getTasksMd(path) {
+    const r = await fetch(`${API_BASE}/api/workspace/tasks-md?path=${encodeURIComponent(path)}`);
+    if (!r.ok) throw new Error(`Failed to read tasks.md: ${r.statusText}`);
+    return r.json();
+  },
+  async saveTasksMd(path, content) {
+    const r = await fetch(`${API_BASE}/api/workspace/tasks-md`, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path, content })
+    });
+    if (!r.ok) throw new Error(`Failed to save tasks.md: ${r.statusText}`);
+    return r.json();
+  },
+  async convertTasksMd(tasksMdPath, tasksJsonPath) {
+    const r = await fetch(`${API_BASE}/api/workspace/tasks-md/convert`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tasks_md_path: tasksMdPath, tasks_json_path: tasksJsonPath })
+    });
+    if (!r.ok) throw new Error(`Convert failed: ${r.statusText}`);
+    return r.json();
+  },
+  async runOrchestra(tasksJsonPath, maxParallel = 5, repoPath) {
+    const r = await fetch(`${API_BASE}/api/workspace/orchestra/run`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tasks_json_path: tasksJsonPath, max_parallel: maxParallel, repo_path: repoPath || '' })
+    });
+    if (!r.ok) throw new Error(`Orchestra run failed: ${r.statusText}`);
+    return r.json();
+  },
+  async getPipelineTemplates() {
+    const r = await fetch(`${API_BASE}/api/pipelines/templates`);
+    if (!r.ok) throw new Error(`Failed: ${r.status}`);
+    return r.json();
+  },
+  async getPipelineDocs() {
+    const r = await fetch(`${API_BASE}/api/pipelines/docs`);
+    if (!r.ok) throw new Error(`Failed: ${r.status}`);
+    return r.json();
+  },
+  async getActiveRuns(repoPath) {
+    const qs = repoPath ? `?repo_path=${encodeURIComponent(repoPath)}` : '';
+    const r = await fetch(`${API_BASE}/api/workspace/active-runs${qs}`);
+    if (!r.ok) throw new Error(`Failed: ${r.status}`);
+    return r.json();
+  },
+  async cancelRun(runId) {
+    const r = await fetch(`${API_BASE}/api/workspace/runs/${encodeURIComponent(runId)}/cancel`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}'
+    });
+    if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.error || `Failed: ${r.status}`); }
+    return r.json();
+  },
+  async runPipeline(pipelinePath, maxParallel = 3) {
+    const r = await fetch(`${API_BASE}/api/workspace/pipeline/run`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ pipeline_path: pipelinePath, max_parallel: maxParallel })
+    });
+    if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.error || `Pipeline run failed: ${r.status}`); }
+    return r.json();
+  },
+  async brainstormPipeline(repoPath, prompt, options = {}) {
+    const r = await fetch(`${API_BASE}/api/workspace/brainstorm/pipeline`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ repo_path: repoPath, prompt, ...options })
+    });
+    if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.error || `Brainstorm pipeline failed: ${r.status}`); }
+    return r.json();
+  },
+  async brainstormStage(repoPath, pipelinePath, stageName, prompt) {
+    const r = await fetch(`${API_BASE}/api/workspace/brainstorm/stage`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ repo_path: repoPath, pipeline_path: pipelinePath, stage_name: stageName, prompt })
+    });
+    if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.error || `Brainstorm stage failed: ${r.status}`); }
+    return r.json();
+  },
+  // Pipeline Mapping API
+  async createMapping(tasksFileOrFiles, pipelineTemplate, customStages = null) {
+    // Support both single file (string) and array of files
+    const body = Array.isArray(tasksFileOrFiles)
+      ? { tasks_files: tasksFileOrFiles, pipeline_template: pipelineTemplate }
+      : { tasks_file: tasksFileOrFiles, pipeline_template: pipelineTemplate };
+    if (customStages && customStages.length > 0) body.custom_stages = customStages;
+    const r = await fetch(`${API_BASE}/api/pipeline-mapping/create`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+    if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.error || `Create mapping failed: ${r.status}`); }
+    return r.json();
+  },
+  async getMapping(mappingId) {
+    const r = await fetch(`${API_BASE}/api/pipeline-mapping/${encodeURIComponent(mappingId)}`);
+    if (!r.ok) throw new Error(`Failed: ${r.status}`);
+    return r.json();
+  },
+  async assignTask(mappingId, taskId, stageIndex) {
+    const r = await fetch(`${API_BASE}/api/pipeline-mapping/${encodeURIComponent(mappingId)}/assign`, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ task_id: taskId, stage_index: stageIndex })
+    });
+    if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.error || `Assign failed: ${r.status}`); }
+    return r.json();
+  },
+  async unassignTask(mappingId, taskId) {
+    const r = await fetch(`${API_BASE}/api/pipeline-mapping/${encodeURIComponent(mappingId)}/assign/${encodeURIComponent(taskId)}`, { method: 'DELETE' });
+    if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.error || `Unassign failed: ${r.status}`); }
+    return r.json();
+  },
+  async executeMapping(mappingId, taskIds) {
+    const r = await fetch(`${API_BASE}/api/pipeline-mapping/${encodeURIComponent(mappingId)}/execute`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ task_ids: taskIds })
+    });
+    if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.error || `Execute failed: ${r.status}`); }
+    return r.json();
+  },
+  async getMappingHistory(mappingId) {
+    const r = await fetch(`${API_BASE}/api/pipeline-mapping/${encodeURIComponent(mappingId)}/history`);
+    if (!r.ok) throw new Error(`Failed: ${r.status}`);
+    return r.json();
+  },
+  async brainstormToMapping(repoPath, useCase, pipelineTemplate, model = 'sonnet', customStages = null) {
+    const body = { repo_path: repoPath, use_case: useCase, pipeline_template: pipelineTemplate, model };
+    if (customStages && customStages.length > 0) body.custom_stages = customStages;
+    const r = await fetch(`${API_BASE}/api/workspace/brainstorm/to-mapping`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+    if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.error || `Generate & Map failed: ${r.status}`); }
+    return r.json();
+  }
+};
+
+// ── Cache ──
+const cache = { runs: null, details: {}, outputs: {}, streams: {}, pipelines: null, pipelineDetails: {} };
+
+// ── Helpers ──
+function $(sel, parent) { return (parent || document).querySelector(sel); }
+function h(tag, attrs, ...children) {
+  const el = document.createElement(tag);
+  if (attrs) Object.entries(attrs).forEach(([k,v]) => {
+    if (k === 'className') el.className = v;
+    else if (k === 'onclick') el.onclick = v;
+    else if (k === 'innerHTML') el.innerHTML = v;
+    else el.setAttribute(k, v);
+  });
+  children.flat().forEach(c => {
+    if (typeof c === 'string') el.appendChild(document.createTextNode(c));
+    else if (c) el.appendChild(c);
+  });
+  return el;
+}
+
+function formatBytes(n) {
+  if (!n) return '0B';
+  if (n < 1024) return n + 'B';
+  if (n < 1048576) return (n/1024).toFixed(1) + 'K';
+  return (n/1048576).toFixed(1) + 'M';
+}
+
+function formatDate(iso) {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+}
+
+function formatTime(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  return d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
+}
+
+function formatDuration(ms) {
+  if (!ms) return '—';
+  if (ms < 1000) return ms + 'ms';
+  const s = Math.floor(ms / 1000);
+  if (s < 60) return s + 's';
+  const m = Math.floor(s / 60);
+  return `${m}m${s % 60}s`;
+}
+
+function formatCost(n) {
+  if (n == null) return '—';
+  return '$' + n.toFixed(4);
+}
+
+function statusBadge(status, attempt) {
+  const cls = { done: 'badge-done', running: 'badge-running', pending: 'badge-pending', failed: 'badge-failed', retrying: 'badge-retrying', verifying: 'badge-verifying' };
+  const label = status || 'unknown';
+  const attStr = (attempt && attempt > 1) ? ` <small>(×${attempt})</small>` : '';
+  return `<span class="badge ${cls[status] || 'badge-pending'}">${label}${attStr}</span>`;
+}
+
+function verifyBadge(verifyStatus) {
+  if (!verifyStatus || verifyStatus === 'skipped') return '';
+  const cls = { passed: 'badge-verify-passed', failed: 'badge-verify-failed' };
+  const icon = verifyStatus === 'passed' ? '✓' : '✗';
+  return `<span class="badge ${cls[verifyStatus] || 'badge-verify-skipped'}">${icon} ${verifyStatus}</span>`;
+}
+
+function attemptInfo(attempt, maxAttempts) {
+  if (!attempt || !maxAttempts || maxAttempts <= 1) return '';
+  return `<span style="font-size:0.7rem;color:var(--text-muted)">attempt ${attempt}/${maxAttempts}</span>`;
+}
+
+function modelBadge(model) {
+  if (!model) return '';
+  const m = model.toLowerCase();
+  let cls = 'badge-sonnet';
+  if (m.includes('opus')) cls = 'badge-opus';
+  else if (m.includes('haiku')) cls = 'badge-haiku';
+  return `<span class="badge ${cls}">${model}</span>`;
+}
+
+function severityReplace(html) {
+  return html
+    .replace(/\bCRITICAL\b/g, '<span class="badge badge-critical">CRITICAL</span>')
+    .replace(/\b(HIGH)\b(?![^<]*>)/g, '<span class="badge badge-high">HIGH</span>')
+    .replace(/\bMEDIUM\b/g, '<span class="badge badge-medium">MEDIUM</span>')
+    .replace(/\bLOW\b/g, '<span class="badge badge-low">LOW</span>');
+}
+
+// ── Breadcrumb ──
+// ── Stagger Animation Helper ──
+function applyStaggerAnimation(container, selector) {
+  if (!container) return;
+  const items = container.querySelectorAll(selector);
+  items.forEach((item, i) => {
+    item.classList.add('stagger-item');
+    item.style.animationDelay = `${(i + 1) * 60}ms`;
+  });
+}
+
+function setBreadcrumb(...parts) {
+  const bc = $('#breadcrumb');
+  bc.innerHTML = '';
+  parts.forEach((p, i) => {
+    if (i > 0) bc.appendChild(h('span', { className: 'sep' }, '/'));
+    if (p.href) {
+      bc.appendChild(h('a', { href: p.href }, p.text));
+    } else {
+      bc.appendChild(h('span', { className: 'current' }, p.text));
+    }
+  });
+}
+
+// ── Markdown Rendering ──
+function renderMarkdown(md) {
+  if (!window.marked) return `<pre>${md}</pre>`;
+  let html = marked.parse(md, { breaks: false, gfm: true });
+  html = severityReplace(html);
+  return html;
+}
+
+function highlightCodeBlocks(container) {
+  if (!window.hljs) return;
+  container.querySelectorAll('pre code').forEach(block => {
+    hljs.highlightElement(block);
+  });
+}
+
+function addCopyButtons(container) {
+  container.querySelectorAll('pre').forEach(pre => {
+    const btn = h('button', { className: 'copy-btn', onclick: () => {
+      const code = pre.querySelector('code');
+      navigator.clipboard.writeText(code ? code.textContent : pre.textContent);
+      btn.textContent = 'Copied!';
+      btn.classList.add('copied');
+      setTimeout(() => { btn.textContent = 'Copy'; btn.classList.remove('copied'); }, 1500);
+    }}, 'Copy');
+    pre.style.position = 'relative';
+    pre.appendChild(btn);
+  });
+}
+
+function makeCollapsible(container) {
+  container.querySelectorAll('h2, h3').forEach(heading => {
+    const details = document.createElement('details');
+    details.className = 'collapsible';
+    details.open = true;
+    const summary = document.createElement('summary');
+    summary.innerHTML = heading.innerHTML;
+    details.appendChild(summary);
+    const content = document.createElement('div');
+    content.className = 'section-content';
+    let sibling = heading.nextElementSibling;
+    const level = heading.tagName;
+    heading.parentNode.insertBefore(details, heading);
+    heading.remove();
+    while (sibling && !(sibling.tagName === level || (level === 'H2' && sibling.tagName === 'H2') || (level === 'H3' && (sibling.tagName === 'H2' || sibling.tagName === 'H3')))) {
+      const next = sibling.nextElementSibling;
+      content.appendChild(sibling);
+      sibling = next;
+    }
+    details.appendChild(content);
+  });
+}
+
+// ── Tab Highlighting ──
+function updateActiveTab() {
+  const hash = location.hash || '#/runs';
+  const tabs = document.querySelectorAll('#tab-bar a');
+  tabs.forEach(tab => {
+    const href = tab.getAttribute('href');
+    const isActive = hash === href
+      || (href === '#/runs' && (hash === '#/' || hash === '#' || hash.startsWith('#/run/')))
+      || (href === '#/pipelines' && hash.startsWith('#/pipeline/'))
+      || (href === '#/mapper' && hash.startsWith('#/mapper'));
+    tab.classList.toggle('active', isActive);
+  });
+}
+
+// ── Router ──
+function route() {
+  const hash = location.hash || '#/';
+  const app = $('#app');
+  updateActiveTab();
+
+  // Clean up SSE when navigating away from pipeline view
+  if (pipelineEventSource && !hash.match(/^#\/pipeline\//)) {
+    pipelineEventSource.close();
+    pipelineEventSource = null;
+    selectedTrainStage = null;
+  }
+
+  // Clean up mapper SSE when navigating away
+  if (mapperEventSource && !hash.startsWith('#/mapper')) {
+    mapperEventSource.close();
+    mapperEventSource = null;
+  }
+
+  // Stop active-runs polling when leaving workspace
+  if (hash !== '#/workspace' && wsState.activeRunsInterval) {
+    wsStopActiveRunsPolling();
+  }
+
+  let m;
+  if (hash === '#/' || hash === '#' || hash === '#/runs') {
+    renderSessionList();
+  } else if (hash === '#/config') {
+    renderConfigScreen();
+  } else if (hash === '#/workspace') {
+    renderWorkspaceScreen();
+  } else if (hash === '#/pipelines') {
+    renderPipelinesScreen();
+  } else if (hash === '#/mapper') {
+    renderMapperScreen();
+  } else if (m = hash.match(/^#\/run\/([^/]+)$/)) {
+    renderRunDetail(m[1]);
+  } else if (m = hash.match(/^#\/run\/([^/]+)\/([^/]+)\/output$/)) {
+    renderTaskOutput(m[1], m[2]);
+  } else if (m = hash.match(/^#\/run\/([^/]+)\/([^/]+)\/timeline$/)) {
+    renderTaskTimeline(m[1], m[2]);
+  } else if (m = hash.match(/^#\/pipeline\/([^/]+)$/)) {
+    renderPipelineView(m[1]);
+  } else {
+    app.innerHTML = '<div class="error-banner">Route not found</div>';
+  }
+}
+
+// ── Views ──
+async function renderSessionList() {
+  const app = $('#app');
+  setBreadcrumb({ text: 'Runs' });
+  app.innerHTML = '<div class="loading">Loading runs...</div>';
+
+  try {
+    if (!cache.runs) cache.runs = await api.getRuns();
+    const { runs } = cache.runs;
+
+    // Load pipelines (non-fatal)
+    let pipelineHtml = '';
+    try {
+      if (!cache.pipelines) cache.pipelines = await api.getPipelines();
+      const { pipelines } = cache.pipelines;
+      if (pipelines.length > 0) {
+        pipelineHtml = `<div class="pipelines-section">
+          <div class="section-title">Pipelines</div>
+          <table class="pipeline-list-table"><thead><tr>
+            <th>Pipeline</th><th>Stages</th><th>Status</th><th>Cost</th>
+          </tr></thead><tbody>`;
+        for (const p of pipelines) {
+          const stagePills = p.stages.map(s =>
+            `<span class="stage-pill stage-pill-${s.status}">${s.name}</span>`
+          ).join('');
+          const totalCost = p.stages.reduce((sum, s) => sum + (s.cost_usd || 0), 0);
+          pipelineHtml += `<tr onclick="location.hash='#/pipeline/${p.id}'">
+            <td><span style="color:var(--text)">${p.name}</span> <span style="color:var(--text-dim);font-size:0.75rem">${formatDate(p.started_at_iso)} ${formatTime(p.started_at_iso)}</span></td>
+            <td><div class="stage-pills">${stagePills}</div></td>
+            <td>${statusBadge(p.status)}</td>
+            <td>${totalCost > 0 ? formatCost(totalCost) : '—'}</td>
+          </tr>`;
+        }
+        pipelineHtml += '</tbody></table></div>';
+        pipelineHtml += `<div class="section-title" style="margin-top:20px">Runs</div>`;
+      }
+    } catch(_) {}
+
+    // Collect unique repos across all runs
+    const allRepos = [...new Set(runs.flatMap(r => r.workdirs || []))].sort();
+    const initRepo = new URLSearchParams(location.search).get('repo') || '';
+
+    const repoOptions = allRepos.map(r =>
+      `<option value="${escapeHtml(r)}" ${r === initRepo ? 'selected' : ''}>${escapeHtml(r)}</option>`
+    ).join('');
+
+    let html = pipelineHtml + `
+      <div style="margin-bottom:32px;animation:stagger-in 0.5s ease-out">
+        <h1 class="hero-title" style="font-family:var(--display);font-size:3.5rem;font-weight:700;letter-spacing:-0.04em;line-height:1;color:var(--text);margin-bottom:4px">
+          <span style="color:var(--accent)">RUN</span><span style="color:var(--text-dim)">//</span>LOG
+        </h1>
+        <p style="font-family:var(--mono);font-size:0.78rem;color:var(--text-dim);letter-spacing:0.06em;text-transform:uppercase">${runs.length} orchestration${runs.length !== 1 ? 's' : ''} recorded</p>
+      </div>
+      <div class="runs-filter" style="animation:stagger-in 0.5s ease-out;animation-delay:120ms;animation-fill-mode:both">
+        <label>Filter by repo:</label>
+        <select id="runs-repo-filter" onchange="filterRuns()">
+          <option value="">All repos</option>
+          ${repoOptions}
+        </select>
+      </div>
+      <input type="text" class="search-box" placeholder="Search runs by task name..." id="search" style="animation:stagger-in 0.5s ease-out;animation-delay:180ms;animation-fill-mode:both">`;
+    html += `<table class="runs-table"><thead><tr>
+      <th>Run</th><th>Status</th><th>Tasks</th><th>ECC</th><th>Output</th><th>Cost</th>
+    </tr></thead><tbody id="runs-body">`;
+
+    for (const run of runs) {
+      const c = run.task_counts;
+      const total = c.total || 1;
+      // Use run ID as primary name, timestamp as secondary
+      const runName = run.id;
+      const timeStr = `${formatDate(run.started_at_iso)} ${formatTime(run.started_at_iso)}`;
+      const workdirsJson = JSON.stringify(run.workdirs || []).replace(/'/g, '&#39;');
+      html += `<tr onclick="location.hash='#/run/${run.id}'" data-id="${run.id}" data-workdirs='${workdirsJson}'>
+        <td><span class="run-date" style="color:var(--text)">${runName}</span> <span class="run-time" style="display:block;margin-top:2px">${timeStr}</span></td>
+        <td>
+          <div class="status-bar">
+            ${c.done ? `<div class="seg-done" style="width:${c.done/total*100}%"></div>` : ''}
+            ${c.running ? `<div class="seg-running" style="width:${c.running/total*100}%"></div>` : ''}
+            ${c.retrying ? `<div class="seg-retrying" style="width:${c.retrying/total*100}%"></div>` : ''}
+            ${c.verifying ? `<div class="seg-verifying" style="width:${c.verifying/total*100}%"></div>` : ''}
+            ${c.pending ? `<div class="seg-pending" style="width:${c.pending/total*100}%"></div>` : ''}
+            ${c.failed ? `<div class="seg-failed" style="width:${c.failed/total*100}%"></div>` : ''}
+          </div>
+          <div class="status-counts">${c.done} done${c.running ? `, ${c.running} running` : ''}${c.retrying ? `, ${c.retrying} retrying` : ''}${c.verifying ? `, ${c.verifying} verifying` : ''}${c.failed ? `, ${c.failed} failed` : ''}</div>
+        </td>
+        <td>${c.total}</td>
+        <td><span class="ecc-badge ${run.ecc_enabled ? 'ecc-on' : 'ecc-off'}">${run.ecc_enabled ? 'ECC' : 'standalone'}</span></td>
+        <td>${formatBytes(run.total_output_bytes)}</td>
+        <td style="color:var(--text-muted)">${formatCost(run.total_cost_usd)}</td>
+      </tr>`;
+    }
+    html += '</tbody></table>';
+    app.innerHTML = html;
+
+    // Apply initial repo filter from URL
+    if (initRepo) filterRuns();
+
+    // Search filter (also respects repo filter)
+    const search = $('#search');
+    search.addEventListener('input', () => {
+      const q = search.value.toLowerCase();
+      const repoFilter = $('#runs-repo-filter')?.value || '';
+      document.querySelectorAll('#runs-body tr').forEach(tr => {
+        const matchesSearch = tr.dataset.id.includes(q);
+        const matchesRepo = !repoFilter || JSON.parse(tr.dataset.workdirs || '[]').includes(repoFilter);
+        tr.style.display = matchesSearch && matchesRepo ? '' : 'none';
+      });
+    });
+  } catch (e) {
+    app.innerHTML = `<div class="error-banner">Error: ${e.message}</div>`;
+  }
+}
+
+function filterRuns() {
+  const repoFilter = $('#runs-repo-filter')?.value || '';
+  const searchEl = $('#search');
+  const q = searchEl ? searchEl.value.toLowerCase() : '';
+  const params = new URLSearchParams(location.search);
+  if (repoFilter) {
+    params.set('repo', repoFilter);
+  } else {
+    params.delete('repo');
+  }
+  const newSearch = params.toString();
+  history.replaceState(null, '', newSearch ? '?' + newSearch + location.hash : location.pathname + location.hash);
+  document.querySelectorAll('#runs-body tr').forEach(tr => {
+    const matchesSearch = !q || tr.dataset.id.includes(q);
+    const matchesRepo = !repoFilter || JSON.parse(tr.dataset.workdirs || '[]').includes(repoFilter);
+    tr.style.display = matchesSearch && matchesRepo ? '' : 'none';
+  });
+}
+
+async function renderRunDetail(runId) {
+  const app = $('#app');
+  setBreadcrumb({ text: 'Runs', href: '#/runs' }, { text: runId });
+  app.innerHTML = '<div class="loading">Loading run...</div>';
+
+  try {
+    if (!cache.details[runId]) cache.details[runId] = await api.getRun(runId);
+    const run = cache.details[runId];
+
+    // Check if this run belongs to a pipeline
+    const pipelineMatch = runId.match(/^(pipeline-[^-]+-[^-]+-[^-]+-[^-]+-[^-]+)-s\d+t\d+$/);
+    const pipelineLink = pipelineMatch
+      ? `<a class="btn" href="#/pipeline/${pipelineMatch[1]}" style="margin-left:auto">← Pipeline View</a>`
+      : '';
+
+    let html = `<div class="run-header">
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:8px">
+        <h2 style="margin:0">${runId}</h2>
+        ${pipelineLink}
+      </div>
+      <div class="run-header-meta">
+        <span>${formatDate(run.started_at_iso)} ${formatTime(run.started_at_iso)}</span>
+        <span class="ecc-badge ${run.ecc_enabled ? 'ecc-on' : 'ecc-off'}">${run.ecc_enabled ? 'ECC enabled' : 'standalone'}</span>
+        <span>${run.tasks.length} tasks</span>
+        ${run.total_cost_usd != null ? `<span>total cost: <strong style="color:var(--text)">${formatCost(run.total_cost_usd)}</strong></span>` : ''}
+      </div>
+    </div>`;
+
+    html += '<div class="task-grid">';
+    for (const t of run.tasks) {
+      const agents = t.agents ? t.agents.split(',').map(a => `<span class="tag">${a.trim()}</span>`).join('') : '';
+      const skills = t.skills ? t.skills.split(',').map(s => `<span class="tag">${s.trim()}</span>`).join('') : '';
+      html += `<div class="task-card">
+        <div class="task-card-header">
+          ${statusBadge(t.status, t.attempt)}
+          ${verifyBadge(t.verify_status)}
+          <span class="task-card-name">${t.name}</span>
+        </div>
+        <div class="task-card-meta">
+          ${modelBadge(t.model)}
+          ${attemptInfo(t.attempt, t.max_attempts)}
+          ${agents}
+          ${skills}
+        </div>
+        <div class="task-card-size">output: ${formatBytes(t.output_bytes)} · stream: ${formatBytes(t.stream_bytes)}${t.cost_usd != null ? ` · cost: ${formatCost(t.cost_usd)}` : ''}${t.verify_output ? ` · verify: ${t.verify_output.substring(0, 80)}${t.verify_output.length > 80 ? '…' : ''}` : ''}</div>
+        <div class="task-card-actions">
+          ${t.has_output ? `<a class="btn btn-primary" href="#/run/${runId}/${t.id}/output">View Output</a>` : '<span class="btn" style="opacity:0.3">No Output</span>'}
+          ${t.has_stream ? `<a class="btn" href="#/run/${runId}/${t.id}/timeline">Timeline</a>` : ''}
+          ${t.has_verify_output ? `<a class="btn" onclick="viewVerifyOutput('${runId}','${t.id}')" style="cursor:pointer">Verify</a>` : ''}
+        </div>
+      </div>`;
+    }
+    html += '</div>';
+    app.innerHTML = html;
+    applyStaggerAnimation(app, '.task-card');
+  } catch (e) {
+    app.innerHTML = `<div class="error-banner">Error: ${e.message}</div>`;
+  }
+}
+
+async function viewVerifyOutput(runId, taskId) {
+  try {
+    const data = await api.getVerify(runId, taskId);
+    const content = data.verify_output || '(no verification output)';
+    const overlay = document.createElement('div');
+    overlay.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.7);z-index:1000;display:flex;align-items:center;justify-content:center';
+    overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
+    const panel = document.createElement('div');
+    panel.style.cssText = 'background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:24px;max-width:700px;width:90%;max-height:80vh;overflow-y:auto;font-family:var(--mono);font-size:0.85rem;white-space:pre-wrap;color:var(--text)';
+    const header = document.createElement('div');
+    header.style.cssText = 'display:flex;justify-content:space-between;align-items:center;margin-bottom:16px';
+    header.innerHTML = `<strong style="font-size:1rem">Verification Result</strong><button onclick="this.closest('div[style*=fixed]').remove()" style="background:none;border:none;color:var(--text-muted);cursor:pointer;font-size:1.2rem">&times;</button>`;
+    panel.appendChild(header);
+    const body = document.createElement('pre');
+    body.style.cssText = 'margin:0;white-space:pre-wrap;word-break:break-word';
+    body.textContent = content;
+    panel.appendChild(body);
+    overlay.appendChild(panel);
+    document.body.appendChild(overlay);
+  } catch (e) {
+    alert('Failed to load verification output: ' + e.message);
+  }
+}
+
+async function renderTaskOutput(runId, taskId) {
+  const app = $('#app');
+  const displayName = taskId.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+  setBreadcrumb({ text: 'Runs', href: '#/runs' }, { text: runId, href: `#/run/${runId}` }, { text: displayName });
+  app.innerHTML = '<div class="loading">Loading output...</div>';
+
+  try {
+    const key = `${runId}/${taskId}`;
+    if (!cache.outputs[key]) cache.outputs[key] = await api.getOutput(runId, taskId);
+    const md = cache.outputs[key];
+
+    const toolbar = `<div class="output-toolbar">
+      <a class="btn" href="#/run/${runId}/${taskId}/timeline">View Timeline</a>
+      <button class="btn" id="toggle-collapse">Collapse All</button>
+      <a class="btn" href="#/run/${runId}">← Back to Run</a>
+    </div>`;
+
+    app.innerHTML = toolbar + '<div class="output-container" id="output-content"></div>';
+    const container = $('#output-content');
+    container.innerHTML = renderMarkdown(md);
+    highlightCodeBlocks(container);
+    addCopyButtons(container);
+    makeCollapsible(container);
+
+    // Toggle collapse
+    let collapsed = false;
+    $('#toggle-collapse').onclick = () => {
+      collapsed = !collapsed;
+      container.querySelectorAll('details.collapsible').forEach(d => d.open = !collapsed);
+      $('#toggle-collapse').textContent = collapsed ? 'Expand All' : 'Collapse All';
+    };
+  } catch (e) {
+    app.innerHTML = `<div class="error-banner">Error: ${e.message}</div>`;
+  }
+}
+
+async function renderTaskTimeline(runId, taskId) {
+  const app = $('#app');
+  const displayName = taskId.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+  setBreadcrumb({ text: 'Runs', href: '#/runs' }, { text: runId, href: `#/run/${runId}` }, { text: displayName + ' Timeline' });
+  app.innerHTML = '<div class="loading">Parsing timeline...</div>';
+
+  try {
+    const key = `${runId}/${taskId}`;
+    if (!cache.streams[key]) cache.streams[key] = await api.getStream(runId, taskId);
+    const data = cache.streams[key];
+
+    let html = `<div class="output-toolbar">
+      <a class="btn" href="#/run/${runId}/${taskId}/output">View Output</a>
+      <a class="btn" href="#/run/${runId}">← Back to Run</a>
+    </div>`;
+
+    // Meta bar
+    const m = data.meta || {};
+    html += `<div class="tl-meta">
+      <div class="tl-meta-item"><span class="tl-meta-label">Duration</span><span class="tl-meta-value">${formatDuration(m.duration_ms)}</span></div>
+      <div class="tl-meta-item"><span class="tl-meta-label">Cost</span><span class="tl-meta-value">${m.total_cost_usd ? '$' + m.total_cost_usd.toFixed(2) : '—'}</span></div>
+      <div class="tl-meta-item"><span class="tl-meta-label">Turns</span><span class="tl-meta-value">${m.num_turns || '—'}</span></div>
+      <div class="tl-meta-item"><span class="tl-meta-label">Tokens</span><span class="tl-meta-value">${(m.input_tokens||0) + (m.output_tokens||0) || '—'}</span></div>
+      <div class="tl-meta-item"><span class="tl-meta-label">Events</span><span class="tl-meta-value">${data.events.length}</span></div>
+    </div>`;
+
+    html += '<div class="timeline" id="timeline"></div>';
+    app.innerHTML = html;
+
+    // Incremental rendering
+    const container = $('#timeline');
+    const events = data.events;
+    let i = 0;
+    function renderBatch() {
+      const end = Math.min(i + 15, events.length);
+      for (; i < end; i++) {
+        container.appendChild(renderTimelineEvent(events[i]));
+      }
+      if (i < events.length) requestAnimationFrame(renderBatch);
+    }
+    requestAnimationFrame(renderBatch);
+  } catch (e) {
+    app.innerHTML = `<div class="error-banner">Error: ${e.message}</div>`;
+  }
+}
+
+// ── Timeline Event Renderers ──
+const TOOL_ICONS = { Read: '📄', Write: '✏️', Edit: '✏️', Glob: '🔍', Grep: '🔍', Bash: '⚡', Agent: '🤖', Task: '🤖', WebFetch: '🌐', TodoWrite: '📋' };
+
+function renderTimelineEvent(ev) {
+  const div = document.createElement('div');
+  div.className = 'tl-event';
+
+  switch (ev.type) {
+    case 'init':
+      div.classList.add('tl-init');
+      div.innerHTML = `<div class="tl-dot"></div><div class="tl-card">
+        <div class="tl-card-header"><span class="tl-tool-icon">🚀</span> <span class="tl-tool-name">Session Init</span>
+        <span class="tl-tool-summary">model: ${ev.model || '?'} · tools: ${ev.tool_count || '?'} · cwd: ${(ev.cwd||'').split('/').pop()}</span></div></div>`;
+      break;
+
+    case 'thinking':
+      div.classList.add('tl-thinking');
+      const thinkPreview = (ev.text || '').substring(0, 80) + ((ev.text||'').length > 80 ? '...' : '');
+      div.innerHTML = `<div class="tl-dot"></div><div class="tl-card">
+        <div class="tl-card-header" onclick="this.nextElementSibling.style.display = this.nextElementSibling.style.display === 'none' ? 'block' : 'none'">
+          <span class="tl-tool-icon">🧠</span> <span class="tl-tool-name" style="color:var(--yellow)">Thinking</span>
+          <span class="tl-tool-summary">${escapeHtml(thinkPreview)}</span>
+        </div>
+        <div class="tl-card-body" style="display:none">${escapeHtml(ev.text || '')}</div>
+      </div>`;
+      break;
+
+    case 'tool_use':
+      div.classList.add('tl-tool');
+      const icon = TOOL_ICONS[ev.name] || '🔧';
+      const inputStr = ev.input ? JSON.stringify(ev.input, null, 2) : '';
+      div.innerHTML = `<div class="tl-dot"></div><div class="tl-card">
+        <div class="tl-card-header" onclick="this.parentElement.querySelector('.tl-card-body').style.display = this.parentElement.querySelector('.tl-card-body').style.display === 'none' ? 'block' : 'none'">
+          <span class="tl-tool-icon">${icon}</span>
+          <span class="tl-tool-name">${ev.name}</span>
+          <span class="tl-tool-summary">${escapeHtml(ev.summary || '')}</span>
+        </div>
+        <div class="tl-card-body" style="display:none"><strong style="color:var(--text)">Input:</strong>\n${escapeHtml(inputStr)}\n\n<strong style="color:var(--text)">Result:</strong>\n${escapeHtml(ev.result || '(empty)')}${ev.result_truncated ? '\n... (truncated)' : ''}</div>
+      </div>`;
+      break;
+
+    case 'text':
+      div.classList.add('tl-text');
+      const textPreview = (ev.text || '').substring(0, 100) + ((ev.text||'').length > 100 ? '...' : '');
+      div.innerHTML = `<div class="tl-dot"></div><div class="tl-card">
+        <div class="tl-card-header" onclick="this.nextElementSibling.style.display = this.nextElementSibling.style.display === 'none' ? 'block' : 'none'">
+          <span class="tl-tool-icon">💬</span> <span class="tl-tool-name" style="color:var(--green)">Response</span>
+          <span class="tl-tool-summary">${escapeHtml(textPreview)}</span>
+        </div>
+        <div class="tl-card-body" style="display:none">${escapeHtml(ev.text || '')}</div>
+      </div>`;
+      break;
+
+    case 'progress':
+      div.classList.add('tl-progress');
+      div.innerHTML = `<div class="tl-dot"></div><div class="tl-compact">${ev.tool_name ? `<span class="tag">${ev.tool_name}</span> ` : ''}${escapeHtml(ev.description || '')}</div>`;
+      break;
+
+    case 'task_started':
+      div.classList.add('tl-notification');
+      div.innerHTML = `<div class="tl-dot"></div><div class="tl-card"><div class="tl-card-header">
+        <span class="tl-tool-icon">📌</span> <span class="tl-tool-name" style="color:var(--orange)">Task Started</span>
+        <span class="tl-tool-summary">${escapeHtml(ev.description || '')}</span>
+      </div></div>`;
+      break;
+
+    case 'task_notification':
+      div.classList.add('tl-notification');
+      div.innerHTML = `<div class="tl-dot"></div><div class="tl-card"><div class="tl-card-header">
+        <span class="tl-tool-icon">✅</span> <span class="tl-tool-name" style="color:var(--orange)">Task Complete</span>
+        <span class="tl-tool-summary">${escapeHtml(ev.summary || ev.status || '')}</span>
+      </div></div>`;
+      break;
+
+    case 'rate_limit':
+      div.classList.add('tl-notification');
+      div.innerHTML = `<div class="tl-dot" style="background:var(--red);border-color:var(--red)"></div><div class="tl-card" style="border-color:#ef444440"><div class="tl-card-header">
+        <span class="tl-tool-icon">⚠️</span> <span class="tl-tool-name" style="color:var(--red)">Rate Limited</span>
+      </div></div>`;
+      break;
+
+    default:
+      div.innerHTML = `<div class="tl-dot"></div><div class="tl-compact" style="color:var(--text-dim)">${ev.type}: ${JSON.stringify(ev).substring(0, 80)}</div>`;
+  }
+  return div;
+}
+
+function escapeHtml(str) {
+  return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+// ── Config Screen ──
+// ── Config Screen State ──
+const configState = { tab: 'agents', scope: 'all', agents: null, skills: null, hooks: null };
+
+async function renderConfigScreen() {
+  const app = $('#app');
+  setBreadcrumb({ text: 'Config' });
+  app.innerHTML = `
+    <div style="margin-bottom:28px;animation:stagger-in 0.5s ease-out">
+      <h1 class="hero-title" style="font-family:var(--display);font-size:2.5rem;font-weight:700;letter-spacing:-0.04em;line-height:1;color:var(--text);margin-bottom:4px">
+        <span style="color:var(--yellow)">CON</span><span style="color:var(--text-dim)">//</span>FIG
+      </h1>
+    </div>
+    <div class="config-header">
+      <div class="config-tabs">
+        <button class="config-tab ${configState.tab === 'agents' ? 'active' : ''}" onclick="configSwitchTab('agents')">Agents</button>
+        <button class="config-tab ${configState.tab === 'skills' ? 'active' : ''}" onclick="configSwitchTab('skills')">Skills</button>
+        <button class="config-tab ${configState.tab === 'hooks' ? 'active' : ''}" onclick="configSwitchTab('hooks')">Hooks</button>
+      </div>
+      <div class="scope-toggle">
+        <span>Scope:</span>
+        <select id="scope-select" onchange="configSwitchScope(this.value)">
+          <option value="all" ${configState.scope === 'all' ? 'selected' : ''}>All</option>
+          <option value="global" ${configState.scope === 'global' ? 'selected' : ''}>Global (~/.claude)</option>
+          <option value="project" ${configState.scope === 'project' ? 'selected' : ''}>Project (.claude)</option>
+        </select>
+      </div>
+    </div>
+    <div id="config-content"><div class="loading">Loading...</div></div>
+  `;
+  await configRenderTab();
+}
+
+function configSwitchTab(tab) {
+  configState.tab = tab;
+  renderConfigScreen();
+}
+
+function configSwitchScope(scope) {
+  configState.scope = scope;
+  configRenderTab();
+}
+
+async function configRenderTab() {
+  const content = $('#config-content');
+  if (!content) return;
+  content.innerHTML = '<div class="loading">Loading...</div>';
+  try {
+    if (configState.tab === 'agents') await configRenderAgents(content);
+    else if (configState.tab === 'skills') await configRenderSkills(content);
+    else if (configState.tab === 'hooks') await configRenderHooks(content);
+    applyStaggerAnimation(content, '.config-card');
+  } catch (e) {
+    content.innerHTML = `<div class="error-banner">Error: ${e.message}</div>`;
+  }
+}
+
+function configFilterByScope(items) {
+  if (configState.scope === 'all') return items;
+  return items.filter(i => i.scope === configState.scope);
+}
+
+function configExtractMeta(content) {
+  const lines = (content || '').split('\n');
+  let desc = '', model = '';
+  for (const line of lines.slice(0, 30)) {
+    const dl = line.toLowerCase();
+    if (dl.startsWith('description:')) desc = line.slice(12).trim();
+    if (dl.match(/^model\s*:/)) model = line.split(':').slice(1).join(':').trim();
+    if (dl.match(/^#+\s/) && !desc) desc = line.replace(/^#+\s*/, '');
+  }
+  return { desc: desc || 'No description', model };
+}
+
+// ── Agents Tab ──
+async function configRenderAgents(content) {
+  configState.agents = (await api.getAgents()).agents;
+  const filtered = configFilterByScope(configState.agents);
+
+  let html = `<div class="config-toolbar">
+    <button class="btn btn-primary" onclick="configNewAgent()">+ New Agent</button>
+    <span style="color:var(--text-dim);font-family:var(--mono);font-size:0.75rem;margin-left:auto">${filtered.length} agent${filtered.length !== 1 ? 's' : ''}</span>
+  </div>`;
+
+  if (filtered.length === 0) {
+    html += '<div class="config-empty">No agents found</div>';
+  } else {
+    html += '<div class="config-grid">';
+    for (const agent of filtered) {
+      html += configAgentCard(agent);
+    }
+    html += '</div>';
+  }
+  content.innerHTML = html;
+}
+
+function configAgentCard(agent) {
+  return `<div class="config-card">
+    <div class="config-card-header">
+      <span class="config-card-name">${escapeHtml(agent.name)}</span>
+      <span class="badge badge-scope badge-${agent.scope}">${agent.scope}</span>
+    </div>
+    <div class="config-card-desc">${escapeHtml(agent.path)}</div>
+    <div class="config-card-actions">
+      <button class="btn btn-sm" onclick="configEditAgent('${escapeHtml(agent.name)}')">Edit</button>
+      <button class="btn btn-sm btn-danger" onclick="configDeleteAgent('${escapeHtml(agent.name)}')">Delete</button>
+    </div>
+  </div>`;
+}
+
+async function configNewAgent() {
+  configShowEditorModal('New Agent', '', '', configState.scope === 'all' ? 'project' : configState.scope, async (name, scope, body) => {
+    await api.putAgent(name, scope, body);
+    configState.agents = null;
+    await configRenderTab();
+  }, true);
+}
+
+async function configEditAgent(name) {
+  try {
+    const data = await api.getAgent(name);
+    configShowEditorModal(`Edit: ${name}`, name, data.content, data.scope, async (_name, scope, body) => {
+      await api.putAgent(name, scope, body);
+      configState.agents = null;
+      await configRenderTab();
+    }, false);
+  } catch (e) {
+    alert('Failed to load agent: ' + e.message);
+  }
+}
+
+async function configDeleteAgent(name) {
+  if (!confirm(`Delete agent "${name}"? This cannot be undone.`)) return;
+  try {
+    await api.deleteAgent(name);
+    configState.agents = null;
+    await configRenderTab();
+  } catch (e) {
+    alert('Failed to delete agent: ' + e.message);
+  }
+}
+
+// ── Skills Tab ──
+async function configRenderSkills(content) {
+  configState.skills = (await api.getSkills()).skills;
+  const filtered = configFilterByScope(configState.skills);
+
+  let html = `<div class="config-toolbar">
+    <button class="btn btn-primary" onclick="configNewSkill()">+ New Skill</button>
+    <span style="color:var(--text-dim);font-family:var(--mono);font-size:0.75rem;margin-left:auto">${filtered.length} skill${filtered.length !== 1 ? 's' : ''}</span>
+  </div>`;
+
+  if (filtered.length === 0) {
+    html += '<div class="config-empty">No skills found</div>';
+  } else {
+    html += '<div class="config-grid">';
+    for (const skill of filtered) {
+      html += configSkillCard(skill);
+    }
+    html += '</div>';
+  }
+  content.innerHTML = html;
+}
+
+function configSkillCard(skill) {
+  return `<div class="config-card">
+    <div class="config-card-header">
+      <span class="config-card-name">${escapeHtml(skill.name)}</span>
+      <span class="badge badge-scope badge-${skill.scope}">${skill.scope}</span>
+    </div>
+    <div class="config-card-desc">${escapeHtml(skill.path)}</div>
+    <div class="config-card-actions">
+      <button class="btn btn-sm" onclick="configEditSkill('${escapeHtml(skill.name)}')">Edit</button>
+      <button class="btn btn-sm btn-danger" onclick="configDeleteSkill('${escapeHtml(skill.name)}')">Delete</button>
+    </div>
+  </div>`;
+}
+
+async function configNewSkill() {
+  configShowEditorModal('New Skill', '', '', configState.scope === 'all' ? 'project' : configState.scope, async (name, scope, body) => {
+    await api.putSkill(name, scope, body);
+    configState.skills = null;
+    await configRenderTab();
+  }, true);
+}
+
+async function configEditSkill(name) {
+  try {
+    const data = await api.getSkill(name);
+    configShowEditorModal(`Edit: ${name}`, name, data.content, data.scope, async (_name, scope, body) => {
+      await api.putSkill(name, scope, body);
+      configState.skills = null;
+      await configRenderTab();
+    }, false);
+  } catch (e) {
+    alert('Failed to load skill: ' + e.message);
+  }
+}
+
+async function configDeleteSkill(name) {
+  if (!confirm(`Delete skill "${name}"? This cannot be undone.`)) return;
+  try {
+    await api.deleteSkill(name);
+    configState.skills = null;
+    await configRenderTab();
+  } catch (e) {
+    alert('Failed to delete skill: ' + e.message);
+  }
+}
+
+// ── Hooks Tab ──
+async function configRenderHooks(content) {
+  configState.hooks = (await api.getHooks()).hooks;
+
+  let html = '<div class="config-grid">';
+  if (configState.hooks.length === 0) {
+    html = '<div class="config-empty">No hook profiles found</div>';
+  } else {
+    for (const hook of configState.hooks) {
+      const badgeCls = hook.name === 'strict' ? 'badge-critical' : hook.name === 'standard' ? 'badge-medium' : 'badge-low';
+      html += `<div class="config-card">
+        <div class="config-card-header">
+          <span class="badge ${badgeCls}">${escapeHtml(hook.name)}</span>
+        </div>
+        <div class="hook-card-desc">${escapeHtml(hook.description)}</div>
+      </div>`;
+    }
+    html += '</div>';
+  }
+  content.innerHTML = html;
+}
+
+// ── Editor Modal ──
+function configShowEditorModal(title, name, body, scope, onSave, isNew) {
+  // Remove existing modal if any
+  const existing = document.querySelector('.modal-overlay');
+  if (existing) existing.remove();
+
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
+
+  overlay.innerHTML = `<div class="modal">
+    <div class="modal-header">
+      <h3>${escapeHtml(title)}</h3>
+      <button class="modal-close" onclick="this.closest('.modal-overlay').remove()">&times;</button>
+    </div>
+    <div class="modal-body">
+      ${isNew ? `<div class="form-group">
+        <label class="form-label">Name</label>
+        <input type="text" class="form-input" id="modal-name" value="${escapeHtml(name)}" placeholder="my-agent-name" pattern="[a-zA-Z0-9_-]+">
+      </div>` : ''}
+      <div class="form-group">
+        <label class="form-label">Scope</label>
+        <select class="form-input" id="modal-scope">
+          <option value="global" ${scope === 'global' ? 'selected' : ''}>Global (~/.claude)</option>
+          <option value="project" ${scope === 'project' ? 'selected' : ''}>Project (.claude)</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Content (Markdown)</label>
+        <textarea class="form-textarea" id="modal-content">${escapeHtml(body)}</textarea>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn" onclick="this.closest('.modal-overlay').remove()">Cancel</button>
+      <button class="btn btn-primary" id="modal-save">Save</button>
+    </div>
+  </div>`;
+
+  document.body.appendChild(overlay);
+
+  // Focus on name input if new, otherwise content
+  const focusEl = isNew ? overlay.querySelector('#modal-name') : overlay.querySelector('#modal-content');
+  if (focusEl) setTimeout(() => focusEl.focus(), 50);
+
+  overlay.querySelector('#modal-save').onclick = async () => {
+    const finalName = isNew ? overlay.querySelector('#modal-name').value.trim() : name;
+    const finalScope = overlay.querySelector('#modal-scope').value;
+    const finalContent = overlay.querySelector('#modal-content').value;
+
+    if (!finalName) { alert('Name is required'); return; }
+    if (!/^[a-zA-Z0-9_-]+$/.test(finalName)) { alert('Name must contain only letters, numbers, hyphens, and underscores'); return; }
+    if (!finalContent.trim()) { alert('Content is required'); return; }
+
+    const saveBtn = overlay.querySelector('#modal-save');
+    saveBtn.textContent = 'Saving...';
+    saveBtn.disabled = true;
+
+    try {
+      await onSave(finalName, finalScope, finalContent);
+      overlay.remove();
+    } catch (e) {
+      alert('Save failed: ' + e.message);
+      saveBtn.textContent = 'Save';
+      saveBtn.disabled = false;
+    }
+  };
+
+  // Esc to close
+  const escHandler = (e) => {
+    if (e.key === 'Escape') { overlay.remove(); document.removeEventListener('keydown', escHandler); }
+  };
+  document.addEventListener('keydown', escHandler);
+}
+
+// ── Workspace Screen ──
+const wsState = { repos: null, selectedRepo: null, taskFiles: null, selectedFile: null, tasks: [], agents: null, skills: null, pipelineTemplates: null, pipelineDocs: null, pipelines: [], activeRuns: [], activeRunsInterval: null, wsBrainstormMode: 'orchestra', wsProgressMessage: '', generatedTasksFile: null };
+
+async function renderWorkspaceScreen() {
+  const app = $('#app');
+  setBreadcrumb({ text: 'Workspace' });
+  app.innerHTML = '<div class="loading">Loading workspace...</div>';
+
+  try {
+    if (!wsState.repos) {
+      const data = await api.getRepos();
+      wsState.repos = data.repos || [];
+    }
+
+    // ── Two-column layout: Main + Sidebar ──
+    let mainHtml = '';
+    let sidebarHtml = '';
+
+    // ── Main Column: Repo Selector + Task Area ──
+    mainHtml += `<div style="margin-bottom:28px;animation:stagger-in 0.5s ease-out">
+      <h1 class="hero-title" style="font-family:var(--display);font-size:2.5rem;font-weight:700;letter-spacing:-0.04em;line-height:1;color:var(--text);margin-bottom:4px">
+        <span style="color:var(--cyan)">WORK</span><span style="color:var(--text-dim)">//</span>SPACE
+      </h1>
+    </div>`;
+    mainHtml += `<div class="ws-top">
+      <div class="ws-select" style="flex:1">
+        <label>Repository</label>
+        <select id="ws-repo-select" onchange="wsSelectRepo(this.value)">
+          <option value="">— select repo —</option>
+          ${wsState.repos.map(r =>
+            `<option value="${escapeHtml(r.path)}" ${wsState.selectedRepo === r.path ? 'selected' : ''}>${escapeHtml(r.name)} (${escapeHtml(r.path)})</option>`
+          ).join('')}
+        </select>
+      </div>
+      <button class="btn btn-primary" onclick="wsNewTask()" ${!wsState.selectedRepo ? 'disabled style="opacity:0.4"' : ''}>+ New Task</button>
+    </div>`;
+
+    // Task file tabs + task list
+    mainHtml += '<div id="ws-content">';
+    if (wsState.selectedRepo && wsState.taskFiles) {
+      mainHtml += wsRenderTaskArea();
+    } else if (wsState.selectedRepo) {
+      mainHtml += '<div class="loading">Loading tasks...</div>';
+    } else {
+      mainHtml += '<div class="ws-empty">Select a repository to view tasks</div>';
+    }
+    mainHtml += '</div>';
+
+    // ── Sidebar Column: Active Runs + Brainstorm ──
+    // Active Runs
+    sidebarHtml += `<div class="ws-active-runs">
+      <h3>Active Runs</h3>
+      <div id="ws-active-runs">${wsRenderActiveRuns(wsState.activeRuns)}</div>
+    </div>`;
+
+    // Brainstorm Panel
+    const bsMode = wsState.wsBrainstormMode || 'orchestra';
+    sidebarHtml += `<div class="ws-brainstorm">
+      <h3>Brainstorm</h3>
+      <div class="ws-brainstorm-row" style="margin-bottom:10px">
+        <label style="font-size:0.8rem;color:var(--text-muted);white-space:nowrap">Mode</label>
+        <select id="ws-brainstorm-mode" onchange="wsRenderBrainstormModeFields()" style="flex:1">
+          <option value="orchestra" ${bsMode === 'orchestra' ? 'selected' : ''}>Orchestra</option>
+          <option value="pipeline-template" ${bsMode === 'pipeline-template' ? 'selected' : ''}>Pipeline: Template</option>
+          <option value="pipeline-custom" ${bsMode === 'pipeline-custom' ? 'selected' : ''}>Pipeline: Custom</option>
+          <option value="stage-tasks" ${bsMode === 'stage-tasks' ? 'selected' : ''}>Stage Tasks</option>
+        </select>
+      </div>
+      <div id="ws-brainstorm-mode-fields">
+        ${wsBrainstormModeFieldsHtml(bsMode)}
+      </div>
+      <div class="form-group">
+        <textarea id="ws-brainstorm-prompt" class="form-textarea" style="min-height:60px;max-height:120px" placeholder="Describe what you want to build..."></textarea>
+      </div>
+      <div class="ws-brainstorm-row">
+        <select id="ws-brainstorm-model">
+          <option value="sonnet" selected>sonnet</option>
+          <option value="opus">opus</option>
+          <option value="haiku">haiku</option>
+        </select>
+        <button id="ws-brainstorm-btn" class="btn btn-primary" onclick="wsBrainstorm()">${wsBrainstormBtnLabel(bsMode)}</button>
+      </div>
+      <div class="ws-brainstorm-row" style="margin-top:8px">
+        <select id="ws-bs-map-template" title="Pipeline template for Generate & Map" style="min-width:100px;flex:1">
+          <option value="feature">feature</option>
+          <option value="bugfix">bugfix</option>
+          <option value="audit">audit</option>
+          <option value="refactor">refactor</option>
+          <option value="release">release</option>
+          <option value="custom">custom</option>
+        </select>
+        <button class="btn" style="white-space:nowrap;border-color:var(--accent);color:var(--accent)" onclick="wsGenerateAndMap()" title="Generate tasks and open in Pipeline Mapper">Generate &amp; Map</button>
+      </div>
+
+      <div class="ws-progress" id="wsBrainstormProgress">${escapeHtml(wsState.wsProgressMessage || '')}</div>
+
+      <div id="ws-tasks-md-container" style="display:none">
+        <div class="ws-tasks-md-header">
+          <h4 id="ws-tasks-md-filename" style="font-family:var(--mono);font-size:0.85rem;color:var(--accent)">tasks.md</h4>
+          <span id="ws-task-count"></span>
+        </div>
+        <textarea id="ws-tasks-md" class="code-editor"></textarea>
+        <div class="ws-tasks-md-actions">
+          <button class="btn" onclick="wsSaveTasksMd()">Save</button>
+          <button class="btn btn-success" onclick="wsRunOrchestra()">Orchestra</button>
+        </div>
+      </div>
+    </div>`;
+
+    // Combine into layout
+    const html = `<div class="ws-layout">
+      <div class="ws-main">${mainHtml}</div>
+      <div class="ws-sidebar">${sidebarHtml}</div>
+    </div>`;
+
+    app.innerHTML = html;
+
+    // If repo is selected but tasks not loaded yet, load them
+    if (wsState.selectedRepo && !wsState.taskFiles) {
+      await wsLoadRepoTasks(wsState.selectedRepo);
+    }
+
+    // Apply stagger animation to task cards
+    applyStaggerAnimation(app, '.ws-task-card');
+
+    // Start polling active runs
+    wsStartActiveRunsPolling();
+  } catch (e) {
+    app.innerHTML = `<div class="error-banner">Error: ${e.message}</div>`;
+  }
+}
+
+async function wsSelectRepo(repoPath) {
+  wsState.selectedRepo = repoPath || null;
+  wsState.taskFiles = null;
+  wsState.selectedFile = null;
+  wsState.tasks = [];
+  wsState.activeRuns = [];
+  wsState.generatedTasksFile = null;
+  await renderWorkspaceScreen();
+}
+
+async function wsLoadRepoTasks(repoPath) {
+  try {
+    const data = await api.getRepoTasks(repoPath);
+    wsState.taskFiles = data.task_files || [];
+    wsState.pipelines = data.pipelines || [];
+    if (wsState.taskFiles.length > 0 && !wsState.selectedFile) {
+      wsState.selectedFile = wsState.taskFiles[0].path;
+    }
+    if (wsState.selectedFile) {
+      await wsLoadTasksFromFile(wsState.selectedFile);
+    }
+    const content = $('#ws-content');
+    if (content) content.innerHTML = wsRenderTaskArea();
+  } catch (e) {
+    const content = $('#ws-content');
+    if (content) content.innerHTML = `<div class="error-banner">Error loading tasks: ${e.message}</div>`;
+  }
+}
+
+function wsFormatElapsed(seconds) {
+  if (seconds < 60) return `${seconds}s`;
+  const m = Math.floor(seconds / 60), s = seconds % 60;
+  return s > 0 ? `${m}m ${s}s` : `${m}m`;
+}
+
+function wsRenderActiveRuns(runs) {
+  if (!runs || runs.length === 0) {
+    return '<span class="ws-no-runs">No active runs</span>';
+  }
+  return runs.map(r => {
+    const elapsed = wsFormatElapsed(r.elapsed_seconds || 0);
+    const counts = r.task_counts || {};
+    const detail = [
+      counts.running > 0 ? `${counts.running} running` : null,
+      counts.pending > 0 ? `${counts.pending} pending` : null,
+    ].filter(Boolean).join(', ');
+    return `<div class="ws-run-row">
+      <div class="ws-run-spinner"></div>
+      <span class="ws-run-name" title="${escapeHtml(r.run_id)}">${escapeHtml(r.task_name || r.run_id)}</span>
+      <span class="ws-run-elapsed">${elapsed}</span>
+      ${detail ? `<span class="ws-run-id">${escapeHtml(detail)}</span>` : ''}
+      <a class="ws-run-link" href="#/run/${encodeURIComponent(r.run_id)}">View</a>
+      <button class="btn" style="padding:2px 8px;font-size:0.72rem" onclick="wsCancelRun('${escapeHtml(r.run_id)}')">Cancel</button>
+    </div>`;
+  }).join('');
+}
+
+async function wsLoadActiveRuns() {
+  if (!wsState.selectedRepo) return;
+  try {
+    const data = await api.getActiveRuns(wsState.selectedRepo);
+    wsState.activeRuns = data.runs || [];
+  } catch (e) {
+    wsState.activeRuns = [];
+  }
+  const el = $('#ws-active-runs');
+  if (el) el.innerHTML = wsRenderActiveRuns(wsState.activeRuns);
+}
+
+function wsStartActiveRunsPolling() {
+  if (wsState.activeRunsInterval) return;
+  wsLoadActiveRuns();
+  wsState.activeRunsInterval = setInterval(wsLoadActiveRuns, 5000);
+}
+
+function wsStopActiveRunsPolling() {
+  if (wsState.activeRunsInterval) {
+    clearInterval(wsState.activeRunsInterval);
+    wsState.activeRunsInterval = null;
+  }
+}
+
+async function wsCancelRun(runId) {
+  if (!confirm(`Cancel run ${runId}?`)) return;
+  try {
+    await api.cancelRun(runId);
+    await wsLoadActiveRuns();
+  } catch (e) {
+    alert('Cancel failed: ' + e.message);
+  }
+}
+
+async function wsLoadTasksFromFile(filePath) {
+  try {
+    const r = await fetch(`${API_BASE}/api/workspace/tasks-file?path=${encodeURIComponent(filePath)}`);
+    if (r.ok) {
+      const fileData = await r.json();
+      wsState.tasks = fileData.tasks || [];
+    } else {
+      wsState.tasks = [];
+    }
+  } catch (e) {
+    wsState.tasks = [];
+  }
+}
+
+function wsRenderTaskArea() {
+  let html = '';
+
+  // File tabs
+  if (wsState.taskFiles && wsState.taskFiles.length > 0) {
+    html += '<div class="ws-file-tabs">';
+    for (const tf of wsState.taskFiles) {
+      const isActive = wsState.selectedFile === tf.path;
+      html += `<button class="ws-file-tab ${isActive ? 'active' : ''}" onclick="wsSelectFile('${escapeHtml(tf.path)}')">${escapeHtml(tf.name)} <span class="file-count">(${tf.task_counts.total})</span></button>`;
+    }
+    html += '</div>';
+  }
+
+  // Task grid
+  if (wsState.tasks.length === 0) {
+    html += '<div class="ws-empty">No tasks in this file. Click "+ New Task" to create one.</div>';
+  } else {
+    html += '<div class="task-grid">';
+    for (const task of wsState.tasks) {
+      html += wsTaskCard(task);
+    }
+    html += '</div>';
+  }
+
+  return html;
+}
+
+function wsTaskCard(task) {
+  const agentTags = task.agents
+    ? task.agents.split(',').map(a => `<span class="tag tag-agent">${escapeHtml(a.trim())}</span>`).join('')
+    : '';
+  const skillTags = task.skills
+    ? task.skills.split(',').map(s => `<span class="tag tag-skill">${escapeHtml(s.trim())}</span>`).join('')
+    : '';
+  const hookBadge = task.hooks
+    ? `<span class="tag">${escapeHtml(task.hooks)}</span>`
+    : '';
+  const promptPreview = task.prompt
+    ? escapeHtml(task.prompt.substring(0, 100) + (task.prompt.length > 100 ? '...' : ''))
+    : '<em style="color:var(--text-dim)">No prompt</em>';
+  const taskId = escapeHtml(task.id);
+  const filePath = escapeHtml(wsState.selectedFile || '');
+
+  return `<div class="ws-task-card">
+    <div class="ws-task-header">
+      ${statusBadge(task.status)}
+      <span class="ws-task-name">${escapeHtml(task.name)}</span>
+      ${modelBadge(task.model)}
+    </div>
+    <div class="ws-task-tags">${agentTags}${skillTags}${hookBadge}</div>
+    <div class="ws-task-prompt">${promptPreview}</div>
+    <div class="ws-task-actions">
+      <button class="btn btn-sm btn-success" onclick="wsRunTask('${taskId}', '${filePath}')">Run</button>
+      <button class="btn btn-sm" onclick="wsEditTask('${taskId}')">Edit</button>
+      <button class="btn btn-sm btn-danger" onclick="wsDeleteTask('${taskId}', '${filePath}')">Delete</button>
+    </div>
+  </div>`;
+}
+
+async function wsSelectFile(filePath) {
+  wsState.selectedFile = filePath;
+  wsState.tasks = [];
+  await wsLoadTasksFromFile(filePath);
+  const content = $('#ws-content');
+  if (content) content.innerHTML = wsRenderTaskArea();
+}
+
+async function wsRunTask(taskId, filePath) {
+  if (!confirm(`Run task "${taskId}"?`)) return;
+  try {
+    const result = await api.runTask(taskId, filePath, wsState.selectedRepo);
+    alert(`Task started! Run ID: ${result.run_id || 'unknown'}\nCheck the Runs tab for progress.`);
+    wsLoadActiveRuns();
+  } catch (e) {
+    alert('Failed to run task: ' + e.message);
+  }
+}
+
+async function wsDeleteTask(taskId, filePath) {
+  if (!confirm(`Delete task "${taskId}"? This cannot be undone.`)) return;
+  try {
+    await api.deleteTask(taskId, filePath);
+    wsState.taskFiles = null;
+    await wsLoadRepoTasks(wsState.selectedRepo);
+  } catch (e) {
+    alert('Failed to delete task: ' + e.message);
+  }
+}
+
+async function wsEditTask(taskId) {
+  const task = wsState.tasks.find(t => t.id === taskId);
+  if (!task) { alert('Task not found'); return; }
+  wsShowTaskModal(task, false);
+}
+
+async function wsNewTask() {
+  if (!wsState.selectedRepo) { alert('Select a repository first'); return; }
+  wsShowTaskModal({
+    id: '',
+    name: '',
+    prompt: '',
+    model: 'opus',
+    workdir: wsState.selectedRepo,
+    agents: '',
+    skills: '',
+    hooks: 'standard',
+  }, true);
+}
+
+async function wsShowTaskModal(task, isNew) {
+  const existing = document.querySelector('.modal-overlay');
+  if (existing) existing.remove();
+
+  // Load agents and skills for checkboxes if not cached
+  if (!wsState.agents) {
+    try { wsState.agents = (await api.getAgents()).agents || []; } catch (_) { wsState.agents = []; }
+  }
+  if (!wsState.skills) {
+    try { wsState.skills = (await api.getSkills()).skills || []; } catch (_) { wsState.skills = []; }
+  }
+
+  const selectedAgents = new Set((task.agents || '').split(',').map(a => a.trim()).filter(Boolean));
+  const selectedSkills = new Set((task.skills || '').split(',').map(s => s.trim()).filter(Boolean));
+
+  const agentChecks = wsState.agents.map(a => {
+    const checked = selectedAgents.has(a.name);
+    return `<label class="ws-check ${checked ? 'checked' : ''}"><input type="checkbox" value="${escapeHtml(a.name)}" ${checked ? 'checked' : ''} onchange="this.parentElement.classList.toggle('checked',this.checked)">${escapeHtml(a.name)}</label>`;
+  }).join('');
+
+  const skillChecks = wsState.skills.map(s => {
+    const checked = selectedSkills.has(s.name);
+    return `<label class="ws-check ${checked ? 'checked' : ''}"><input type="checkbox" value="${escapeHtml(s.name)}" ${checked ? 'checked' : ''} onchange="this.parentElement.classList.toggle('checked',this.checked)">${escapeHtml(s.name)}</label>`;
+  }).join('');
+
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
+
+  overlay.innerHTML = `<div class="modal" style="max-width:750px">
+    <div class="modal-header">
+      <h3>${isNew ? 'New Task' : 'Edit Task: ' + escapeHtml(task.name)}</h3>
+      <button class="modal-close" onclick="this.closest('.modal-overlay').remove()">&times;</button>
+    </div>
+    <div class="modal-body">
+      <div class="form-group">
+        <label class="form-label">Name</label>
+        <input type="text" class="form-input" id="ws-modal-name" value="${escapeHtml(task.name)}" placeholder="Task name" ${!isNew ? 'readonly style="opacity:0.6"' : ''}>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Prompt</label>
+        <textarea class="form-textarea" id="ws-modal-prompt" style="min-height:150px">${escapeHtml(task.prompt || '')}</textarea>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px">
+        <div class="form-group">
+          <label class="form-label">Model</label>
+          <select class="form-input" id="ws-modal-model">
+            <option value="opus" ${task.model === 'opus' ? 'selected' : ''}>opus</option>
+            <option value="sonnet" ${task.model === 'sonnet' ? 'selected' : ''}>sonnet</option>
+            <option value="haiku" ${task.model === 'haiku' ? 'selected' : ''}>haiku</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Hooks</label>
+          <select class="form-input" id="ws-modal-hooks">
+            <option value="" ${!task.hooks ? 'selected' : ''}>none</option>
+            <option value="strict" ${task.hooks === 'strict' ? 'selected' : ''}>strict</option>
+            <option value="standard" ${task.hooks === 'standard' ? 'selected' : ''}>standard</option>
+            <option value="minimal" ${task.hooks === 'minimal' ? 'selected' : ''}>minimal</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Workdir</label>
+          <input type="text" class="form-input" id="ws-modal-workdir" value="${escapeHtml(task.workdir || wsState.selectedRepo || '')}" placeholder="/path/to/repo">
+        </div>
+      </div>
+      <div class="form-group">
+        <div class="ws-section-title">Agents ${agentChecks ? '' : '<span style="opacity:0.5">(none available)</span>'}</div>
+        <div class="ws-checks" id="ws-modal-agents">${agentChecks || '<span style="color:var(--text-dim);font-size:0.75rem">No agents found</span>'}</div>
+      </div>
+      <div class="form-group">
+        <div class="ws-section-title">Skills ${skillChecks ? '' : '<span style="opacity:0.5">(none available)</span>'}</div>
+        <div class="ws-checks" id="ws-modal-skills">${skillChecks || '<span style="color:var(--text-dim);font-size:0.75rem">No skills found</span>'}</div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn" onclick="this.closest('.modal-overlay').remove()">Cancel</button>
+      ${!isNew ? `<button class="btn btn-success" id="ws-modal-run">Save & Run</button>` : ''}
+      <button class="btn btn-primary" id="ws-modal-save">${isNew ? 'Create' : 'Save'}</button>
+    </div>
+  </div>`;
+
+  document.body.appendChild(overlay);
+  setTimeout(() => {
+    const focusEl = isNew ? overlay.querySelector('#ws-modal-name') : overlay.querySelector('#ws-modal-prompt');
+    if (focusEl) focusEl.focus();
+  }, 50);
+
+  const collectFormData = () => {
+    const name = overlay.querySelector('#ws-modal-name').value.trim();
+    const prompt = overlay.querySelector('#ws-modal-prompt').value;
+    const model = overlay.querySelector('#ws-modal-model').value;
+    const hooks = overlay.querySelector('#ws-modal-hooks').value;
+    const workdir = overlay.querySelector('#ws-modal-workdir').value.trim();
+    const agents = Array.from(overlay.querySelectorAll('#ws-modal-agents input:checked')).map(cb => cb.value).join(', ');
+    const skills = Array.from(overlay.querySelectorAll('#ws-modal-skills input:checked')).map(cb => cb.value).join(', ');
+    return { name, prompt, model, hooks, workdir, agents, skills };
+  };
+
+  const slugify = (str) => str.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+
+  overlay.querySelector('#ws-modal-save').onclick = async () => {
+    const form = collectFormData();
+    if (!form.name) { alert('Name is required'); return; }
+
+    const saveBtn = overlay.querySelector('#ws-modal-save');
+    saveBtn.textContent = 'Saving...';
+    saveBtn.disabled = true;
+
+    try {
+      const filePath = wsState.selectedFile || (wsState.selectedRepo + '/tasks.json');
+      if (isNew) {
+        const taskData = {
+          id: slugify(form.name),
+          name: form.name,
+          prompt: form.prompt,
+          model: form.model,
+          workdir: form.workdir,
+        };
+        if (form.agents) taskData.agents = form.agents;
+        if (form.skills) taskData.skills = form.skills;
+        if (form.hooks) taskData.hooks = form.hooks;
+        await api.createTask(filePath, taskData);
+      } else {
+        const fields = {
+          name: form.name,
+          prompt: form.prompt,
+          model: form.model,
+          workdir: form.workdir,
+          agents: form.agents,
+          skills: form.skills,
+          hooks: form.hooks,
+        };
+        await api.updateTask(task.id, filePath, fields);
+      }
+      overlay.remove();
+      wsState.taskFiles = null;
+      await wsLoadRepoTasks(wsState.selectedRepo);
+    } catch (e) {
+      alert('Save failed: ' + e.message);
+      saveBtn.textContent = isNew ? 'Create' : 'Save';
+      saveBtn.disabled = false;
+    }
+  };
+
+  // Save & Run button (edit mode only)
+  const runBtn = overlay.querySelector('#ws-modal-run');
+  if (runBtn) {
+    runBtn.onclick = async () => {
+      const form = collectFormData();
+      if (!form.name) { alert('Name is required'); return; }
+
+      runBtn.textContent = 'Saving...';
+      runBtn.disabled = true;
+
+      try {
+        const filePath = wsState.selectedFile || (wsState.selectedRepo + '/tasks.json');
+        const fields = {
+          name: form.name, prompt: form.prompt, model: form.model, workdir: form.workdir,
+          agents: form.agents, skills: form.skills, hooks: form.hooks,
+        };
+        await api.updateTask(task.id, filePath, fields);
+
+        runBtn.textContent = 'Running...';
+        const result = await api.runTask(task.id, filePath, wsState.selectedRepo);
+        overlay.remove();
+        alert(`Task started! Run ID: ${result.run_id || 'unknown'}\nCheck the Runs tab.`);
+        wsLoadActiveRuns();
+        wsState.taskFiles = null;
+        await wsLoadRepoTasks(wsState.selectedRepo);
+      } catch (e) {
+        alert('Failed: ' + e.message);
+        runBtn.textContent = 'Save & Run';
+        runBtn.disabled = false;
+      }
+    };
+  }
+
+  // Esc to close
+  const escHandler = (e) => {
+    if (e.key === 'Escape') { overlay.remove(); document.removeEventListener('keydown', escHandler); }
+  };
+  document.addEventListener('keydown', escHandler);
+}
+
+function wsSetProgress(msg) {
+  wsState.wsProgressMessage = msg;
+  const el = $('#wsBrainstormProgress');
+  if (el) el.textContent = msg;
+}
+
+function wsBrainstormBtnLabel(mode) {
+  if (mode === 'stage-tasks') return 'Generate';
+  if (mode === 'pipeline-template' || mode === 'pipeline-custom') return 'Generate & Run';
+  return 'Brainstorm & Edit';
+}
+
+function wsBrainstormModeFieldsHtml(mode) {
+  if (mode === 'pipeline-template') {
+    return `<div class="ws-brainstorm-mode-fields" style="margin-bottom:10px">
+      <select id="ws-bs-template-name" style="width:100%">
+        <option value="feature">feature</option>
+        <option value="bugfix">bugfix</option>
+        <option value="audit">audit</option>
+        <option value="refactor">refactor</option>
+        <option value="release">release</option>
+      </select>
+    </div>`;
+  }
+  if (mode === 'pipeline-custom') {
+    return `<div class="ws-brainstorm-mode-fields" style="margin-bottom:10px">
+      <label>Pipeline name</label>
+      <input id="ws-bs-pipeline-name" placeholder="my-pipeline">
+      <label>Stages (comma-separated)</label>
+      <input id="ws-bs-stages" placeholder="Plan, Implement, Review">
+    </div>`;
+  }
+  if (mode === 'stage-tasks') {
+    const pipelines = wsState.repoPipelines || [];
+    const pipelineOpts = pipelines.length > 0
+      ? pipelines.map(p => `<option value="${escapeHtml(p.path)}">${escapeHtml(p.name || p.file)}</option>`).join('')
+      : '<option value="">— no pipelines —</option>';
+    const firstPipeline = pipelines[0];
+    const stageNames = (firstPipeline && firstPipeline.stage_names) || [];
+    const stageOpts = stageNames.length > 0
+      ? stageNames.map(s => `<option value="${escapeHtml(s)}">${escapeHtml(s)}</option>`).join('')
+      : '<option value="">— select pipeline first —</option>';
+    return `<div class="ws-brainstorm-mode-fields" style="margin-bottom:10px">
+      <label>Pipeline</label>
+      <select id="ws-bs-pipeline-path" onchange="wsRenderBrainstormStageDropdown()">${pipelineOpts}</select>
+      <label>Stage</label>
+      <select id="ws-bs-stage-name">${stageOpts}</select>
+    </div>`;
+  }
+  return '';
+}
+
+function wsRenderBrainstormModeFields() {
+  const modeEl = $('#ws-brainstorm-mode');
+  if (!modeEl) return;
+  const mode = modeEl.value;
+  wsState.wsBrainstormMode = mode;
+  const fieldsEl = $('#ws-brainstorm-mode-fields');
+  if (fieldsEl) fieldsEl.innerHTML = wsBrainstormModeFieldsHtml(mode);
+  const btnEl = $('#ws-brainstorm-btn');
+  if (btnEl) btnEl.textContent = wsBrainstormBtnLabel(mode);
+}
+
+function wsRenderBrainstormStageDropdown() {
+  const pipelineEl = $('#ws-bs-pipeline-path');
+  const stageEl = $('#ws-bs-stage-name');
+  if (!pipelineEl || !stageEl) return;
+  const pipeline = (wsState.repoPipelines || []).find(p => p.path === pipelineEl.value);
+  const stages = (pipeline && pipeline.stage_names) || [];
+  stageEl.innerHTML = stages.length > 0
+    ? stages.map(s => `<option value="${escapeHtml(s)}">${escapeHtml(s)}</option>`).join('')
+    : '<option value="">— no stages —</option>';
+}
+
+async function wsBrainstormPipelineTemplate() {
+  const promptEl = $('#ws-brainstorm-prompt');
+  const templateEl = $('#ws-bs-template-name');
+  if (!promptEl?.value.trim()) { alert('Enter a prompt'); return; }
+  if (!templateEl?.value.trim()) { alert('Enter a template name'); return; }
+  if (!wsState.selectedRepo) { alert('Select a repository first'); return; }
+  const panel = promptEl.closest('.ws-brainstorm');
+  panel.classList.add('loading');
+  wsSetProgress('Generating pipeline tasks...');
+  try {
+    const result = await api.brainstormPipeline(wsState.selectedRepo, promptEl.value.trim(), { template_name: templateEl.value.trim() });
+    const stages = result.stages || [];
+    for (let i = 0; i < stages.length; i++) {
+      wsSetProgress(`Generating tasks for Stage ${i + 1}/${stages.length}: ${stages[i].name || stages[i].file || ''}...`);
+    }
+    if (stages.length) wsSetProgress(`Generated ${stages.length} stage${stages.length !== 1 ? 's' : ''}. Starting pipeline...`);
+    const runResult = await api.runPipeline(result.pipeline_path || result.path);
+    wsSetProgress(`Pipeline started! Run ID: ${runResult.run_id || 'unknown'}`);
+    wsLoadActiveRuns();
+    location.hash = '#/runs';
+  } catch (e) {
+    wsSetProgress('');
+    alert('Brainstorm pipeline failed: ' + e.message);
+  } finally {
+    panel.classList.remove('loading');
+  }
+}
+
+async function wsBrainstormPipelineCustom() {
+  const promptEl = $('#ws-brainstorm-prompt');
+  const pipelineNameEl = $('#ws-bs-pipeline-name');
+  const stagesEl = $('#ws-bs-stages');
+  if (!promptEl?.value.trim()) { alert('Enter a prompt'); return; }
+  if (!stagesEl?.value.trim()) { alert('Enter stages (comma-separated)'); return; }
+  if (!wsState.selectedRepo) { alert('Select a repository first'); return; }
+  const stages = stagesEl.value.split(',').map(s => s.trim()).filter(Boolean);
+  if (!stages.length) { alert('Enter at least one stage'); return; }
+  const panel = promptEl.closest('.ws-brainstorm');
+  panel.classList.add('loading');
+  wsSetProgress('Generating pipeline tasks...');
+  try {
+    const body = { stages };
+    if (pipelineNameEl?.value.trim()) body.pipeline_name = pipelineNameEl.value.trim();
+    const result = await api.brainstormPipeline(wsState.selectedRepo, promptEl.value.trim(), body);
+    const resultStages = result.stages || [];
+    for (let i = 0; i < resultStages.length; i++) {
+      wsSetProgress(`Generating tasks for Stage ${i + 1}/${resultStages.length}: ${resultStages[i].name || resultStages[i].file || ''}...`);
+    }
+    if (resultStages.length) wsSetProgress(`Generated ${resultStages.length} stage${resultStages.length !== 1 ? 's' : ''}. Starting pipeline...`);
+    const runResult = await api.runPipeline(result.pipeline_path || result.path);
+    wsSetProgress(`Pipeline started! Run ID: ${runResult.run_id || 'unknown'}`);
+    wsLoadActiveRuns();
+    location.hash = '#/runs';
+  } catch (e) {
+    wsSetProgress('');
+    alert('Brainstorm pipeline failed: ' + e.message);
+  } finally {
+    panel.classList.remove('loading');
+  }
+}
+
+async function wsBrainstormStage() {
+  const promptEl = $('#ws-brainstorm-prompt');
+  const pipelinePathEl = $('#ws-bs-pipeline-path');
+  const stageNameEl = $('#ws-bs-stage-name');
+  if (!promptEl?.value.trim()) { alert('Enter a prompt'); return; }
+  if (!pipelinePathEl?.value.trim()) { alert('Enter the pipeline path'); return; }
+  if (!stageNameEl?.value.trim()) { alert('Enter the stage name'); return; }
+  if (!wsState.selectedRepo) { alert('Select a repository first'); return; }
+  const panel = promptEl.closest('.ws-brainstorm');
+  panel.classList.add('loading');
+  wsSetProgress('Generating tasks...');
+  try {
+    const result = await api.brainstormStage(wsState.selectedRepo, pipelinePathEl.value.trim(), stageNameEl.value.trim(), promptEl.value.trim());
+    wsSetProgress(`Tasks generated: ${result.tasks_path || result.file || 'done'}`);
+  } catch (e) {
+    wsSetProgress('');
+    alert('Brainstorm stage failed: ' + e.message);
+  } finally {
+    panel.classList.remove('loading');
+  }
+}
+
+async function wsBrainstorm() {
+  const mode = wsState.wsBrainstormMode || 'orchestra';
+  if (mode === 'pipeline-template') return wsBrainstormPipelineTemplate();
+  if (mode === 'pipeline-custom') return wsBrainstormPipelineCustom();
+  if (mode === 'stage-tasks') return wsBrainstormStage();
+
+  const promptEl = $('#ws-brainstorm-prompt');
+  const modelEl = $('#ws-brainstorm-model');
+  if (!promptEl || !promptEl.value.trim()) { alert('Enter a prompt'); return; }
+  if (!wsState.selectedRepo) { alert('Select a repository first'); return; }
+
+  const panel = promptEl.closest('.ws-brainstorm');
+  panel.classList.add('loading');
+  wsSetProgress('Generating tasks...');
+  try {
+    const result = await api.brainstorm(wsState.selectedRepo, promptEl.value.trim(), modelEl.value);
+    wsSetProgress('');
+    wsState.generatedTasksFile = result.tasks_file || null;
+    const container = $('#ws-tasks-md-container');
+    const tasksMdEl = $('#ws-tasks-md');
+    const taskCountEl = $('#ws-task-count');
+    const fileHeaderEl = $('#ws-tasks-md-filename');
+    tasksMdEl.value = result.tasks_md || '';
+    const taskCount = (result.tasks_md || '').split('\n').filter(l => l.startsWith('## ')).length;
+    taskCountEl.textContent = taskCount ? `${taskCount} task${taskCount !== 1 ? 's' : ''}` : '';
+    if (fileHeaderEl && result.tasks_filename) {
+      fileHeaderEl.textContent = result.tasks_filename;
+      fileHeaderEl.title = result.tasks_file || '';
+    }
+    container.style.display = 'block';
+  } catch (e) {
+    wsSetProgress('');
+    alert('Brainstorm failed: ' + e.message);
+  } finally {
+    panel.classList.remove('loading');
+  }
+}
+
+async function wsSaveTasksMd() {
+  const tasksMdEl = $('#ws-tasks-md');
+  if (!wsState.selectedRepo) { alert('Select a repository first'); return; }
+  const filePath = wsState.generatedTasksFile || (wsState.selectedRepo + '/tasks.md');
+  try {
+    await api.saveTasksMd(filePath, tasksMdEl.value);
+    const filename = filePath.split('/').pop();
+    alert(`${filename} saved.`);
+  } catch (e) {
+    alert('Save failed: ' + e.message);
+  }
+}
+
+async function wsRunOrchestra() {
+  if (!wsState.selectedRepo) { alert('Select a repository first'); return; }
+  const tasksMdEl = $('#ws-tasks-md');
+  const tasksMdPath = wsState.generatedTasksFile || (wsState.selectedRepo + '/tasks.md');
+  const baseName = tasksMdPath.replace(/\.md$/, '');
+  const tasksJsonPath = baseName + '.json';
+  try {
+    await api.saveTasksMd(tasksMdPath, tasksMdEl.value);
+    await api.convertTasksMd(tasksMdPath, tasksJsonPath);
+    const result = await api.runOrchestra(tasksJsonPath, 5, wsState.selectedRepo);
+    alert(`Orchestra started! Run ID: ${result.run_id || 'unknown'}\nCheck the Runs tab.`);
+    wsState.taskFiles = null;
+    wsLoadActiveRuns();
+    await wsLoadRepoTasks(wsState.selectedRepo);
+  } catch (e) {
+    alert('Orchestra failed: ' + e.message);
+  }
+}
+
+async function wsRunPipeline(pipelinePath) {
+  if (!pipelinePath) { alert('No pipeline specified'); return; }
+  if (!confirm(`Run pipeline: ${pipelinePath}?\n\nThis will execute the pipeline stages sequentially.`)) return;
+  try {
+    const result = await api.runPipeline(pipelinePath);
+    alert(`Pipeline started! Run ID: ${result.run_id || 'unknown'}\nCheck the Runs tab.`);
+    wsLoadActiveRuns();
+  } catch (e) {
+    alert('Pipeline failed: ' + e.message);
+  }
+}
+
+async function wsUseTemplate() {
+  const sel = $('#ws-pipeline-template');
+  if (!sel || !sel.value) { alert('Choose a template first'); return; }
+  const name = sel.value;
+  const template = (wsState.pipelineTemplates || []).find(t => t.name === name);
+  if (!template) return;
+  const targetDir = wsState.selectedRepo || '.';
+  const stages = (template.stages || []).join(' → ');
+  const msg = `Template: ${name}\nDescription: ${template.description || ''}\nStages: ${stages}\n\nThis will create:\n  ${targetDir}/pipeline-${name}.json\n\nContinue?`;
+  if (!confirm(msg)) return;
+  try {
+    const r = await fetch(`${API_BASE}/api/pipelines/templates/${encodeURIComponent(name)}/create`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ dest_dir: targetDir })
+    });
+    if (r.ok) {
+      const result = await r.json();
+      alert(`Pipeline created: ${result.path || `pipeline-${name}.json`}`);
+    } else {
+      // Fallback: show the template JSON in the docs panel for manual copy
+      const pipelineJson = JSON.stringify({
+        name: template.name,
+        stages: (template.stages || []).map(s => ({
+          name: s,
+          tasks: [{ file: `tasks-${s.toLowerCase()}.json`, max_parallel: 3 }],
+          pass_outputs_to_next: true
+        })),
+        aggregate: true
+      }, null, 2);
+      const docsEl = $('#ws-pipeline-docs');
+      if (docsEl) {
+        const parentDetails = docsEl.closest('details');
+        if (parentDetails) parentDetails.open = true;
+        docsEl.textContent = `# Template: ${name} — copy to pipeline-${name}.json\n\n${pipelineJson}`;
+      }
+      alert('API endpoint not available — template JSON shown in the docs panel.');
+    }
+  } catch (e) {
+    alert('Failed to use template: ' + e.message);
+  }
+}
+
+// ── Pipelines Screen ──
+async function renderPipelinesScreen() {
+  const app = $('#app');
+  setBreadcrumb({ text: 'Pipelines' });
+  app.innerHTML = '<div class="loading">Loading pipelines...</div>';
+
+  try {
+    // Load pipeline templates and docs for guide
+    if (!wsState.pipelineTemplates) {
+      try { wsState.pipelineTemplates = (await api.getPipelineTemplates()).templates || []; } catch (e) { wsState.pipelineTemplates = []; }
+    }
+    if (!wsState.pipelineDocs) {
+      try { wsState.pipelineDocs = (await api.getPipelineDocs()).how_to_write || ''; } catch (e) { wsState.pipelineDocs = ''; }
+    }
+    
+    // Load historical pipelines
+    if (!cache.pipelines) cache.pipelines = await api.getPipelines();
+    const { pipelines } = cache.pipelines;
+
+    // Repo pipelines
+    const repoPipelines = wsState.repoPipelines || [];
+    const selectedRepo = wsState.selectedRepo;
+
+    let html = `<div style="margin-bottom:32px;animation:stagger-in 0.5s ease-out">
+      <h1 class="hero-title" style="font-family:var(--display);font-size:3rem;font-weight:700;letter-spacing:-0.04em;line-height:1;color:var(--text);margin-bottom:4px">
+        <span style="color:var(--green)">PIPE</span><span style="color:var(--text-dim)">//</span>LINE
+      </h1>
+      <p style="font-family:var(--mono);font-size:0.78rem;color:var(--text-dim);letter-spacing:0.06em;text-transform:uppercase">Multi-stage orchestration</p>
+    </div>`;
+
+    // ── Pipeline Guide ──
+    const templateOptions = wsState.pipelineTemplates.map(t =>
+      `<option value="${escapeHtml(t.name)}" title="${escapeHtml(t.description)}">${escapeHtml(t.name)} — ${escapeHtml(t.description)}</option>`
+    ).join('');
+    html += `<div class="ws-section ws-pipeline-guide" style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:16px;margin-bottom:20px">
+      <h3 style="margin:0 0 12px 0">Pipeline Guide</h3>
+      <details>
+        <summary style="cursor:pointer;color:var(--accent)">How to write pipelines</summary>
+        <div class="pipeline-docs" id="ws-pipeline-docs" style="margin-top:12px;padding:12px;background:var(--bg);border-radius:4px;font-family:var(--mono);font-size:0.8rem;white-space:pre-wrap;overflow-x:auto">${escapeHtml(wsState.pipelineDocs)}</div>
+      </details>
+      <div class="pipeline-templates" style="margin-top:12px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <label style="font-size:0.85rem;color:var(--text-muted)">Quick Start:</label>
+        <select id="ws-pipeline-template" style="flex:1;min-width:200px;padding:8px;border-radius:4px;border:1px solid var(--border);background:var(--bg);color:var(--text)">
+          <option value="">Choose a template...</option>
+          ${templateOptions}
+        </select>
+        <button class="btn btn-primary" onclick="wsUseTemplate()">Use Template</button>
+      </div>
+    </div>`;
+
+    // ── Repo Pipelines (if repo selected) ──
+    if (selectedRepo && repoPipelines.length > 0) {
+      html += `<div class="ws-section ws-repo-pipelines" style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:16px;margin-bottom:20px">
+        <h3 style="margin:0 0 12px 0">Repo Pipelines</h3>
+        <div class="ws-pipeline-list">
+          ${repoPipelines.map(p => `
+            <div class="ws-pipeline-item" style="display:flex;align-items:center;gap:12px;padding:10px 12px;background:var(--bg);border-radius:4px;margin-bottom:8px">
+              <span class="ws-pipeline-name" style="font-family:var(--mono);font-size:0.85rem;flex:1">${escapeHtml(p.name || p.file)}</span>
+              <span class="ws-pipeline-stages" style="font-size:0.75rem;color:var(--text-muted)">${p.stages || 0} stages</span>
+              <button class="btn btn-sm btn-success" onclick="wsRunPipeline('${escapeHtml(p.path)}')">Run</button>
+            </div>
+          `).join('')}
+        </div>
+      </div>`;
+    }
+
+    // ── Pipeline History ──
+    if (pipelines.length === 0) {
+      html += '<div style="color:var(--text-muted);font-family:var(--mono);padding:40px 0;text-align:center">No pipeline runs found. Run a pipeline to see it here.</div>';
+    } else {
+      html += `<h3 style="margin:0 0 12px 0">Pipeline History</h3>`;
+      html += `<table class="pipeline-list-table"><thead><tr>
+        <th>Pipeline</th><th>Stages</th><th>Status</th><th>Cost</th>
+      </tr></thead><tbody>`;
+      for (const p of pipelines) {
+        const stagePills = p.stages.map(s =>
+          `<span class="stage-pill stage-pill-${s.status}">${s.name}</span>`
+        ).join('');
+        const totalCost = p.stages.reduce((sum, s) => sum + (s.cost_usd || 0), 0);
+        html += `<tr onclick="location.hash='#/pipeline/${p.id}'" style="cursor:pointer">
+          <td><span style="color:var(--text)">${p.name}</span> <span style="color:var(--text-dim);font-size:0.75rem">${formatDate(p.started_at_iso)} ${formatTime(p.started_at_iso)}</span></td>
+          <td><div class="stage-pills">${stagePills}</div></td>
+          <td>${statusBadge(p.status)}</td>
+          <td>${totalCost > 0 ? formatCost(totalCost) : '—'}</td>
+        </tr>`;
+      }
+      html += '</tbody></table>';
+    }
+    app.innerHTML = html;
+  } catch (e) {
+    app.innerHTML = `<div class="error-banner">Error: ${e.message}</div>`;
+  }
+}
+
+// ── Pipeline View (Train Visualization) ──
+let pipelineEventSource = null;
+let selectedTrainStage = null;
+
+async function renderPipelineView(pipelineId) {
+  const app = $('#app');
+  setBreadcrumb({ text: 'Pipelines', href: '#/pipelines' }, { text: 'Pipeline' });
+  app.innerHTML = '<div class="loading">Loading pipeline...</div>';
+
+  // Clean up previous SSE connection
+  if (pipelineEventSource) {
+    pipelineEventSource.close();
+    pipelineEventSource = null;
+  }
+  selectedTrainStage = null;
+
+  try {
+    if (!cache.pipelineDetails[pipelineId]) {
+      cache.pipelineDetails[pipelineId] = await api.getPipeline(pipelineId);
+    }
+    const pipeline = cache.pipelineDetails[pipelineId];
+
+    setBreadcrumb(
+      { text: 'Pipelines', href: '#/pipelines' },
+      { text: pipeline.name || pipelineId }
+    );
+
+    renderPipelineTrainDOM(app, pipeline, pipelineId);
+    connectPipelineSSE(pipelineId, app);
+  } catch (e) {
+    app.innerHTML = `<div class="error-banner">Error: ${e.message}</div>`;
+  }
+}
+
+function renderPipelineTrainDOM(app, pipeline, pipelineId) {
+  const statuses = pipeline.stages.map(s => s.status);
+  const overallStatus = statuses.includes('running') ? 'running'
+    : statuses.includes('failed') ? 'failed'
+    : statuses.every(s => s === 'done') ? 'done' : 'pending';
+  const totalCost = pipeline.stages.reduce((sum, s) => sum + (s.cost_usd || 0), 0);
+
+  let html = `<div class="pipeline-header">
+    <div style="display:flex;align-items:center;gap:12px;margin-bottom:8px">
+      <h2 style="margin:0">${escapeHtml(pipeline.name || 'Pipeline')}</h2>
+      ${statusBadge(overallStatus)}
+    </div>
+    <div class="pipeline-meta">
+      <span>${formatDate(pipeline.started_at_iso)} ${formatTime(pipeline.started_at_iso)}</span>
+      <span>${pipeline.stages.length} stages</span>
+      ${totalCost > 0 ? `<span>total cost: <strong style="color:var(--text)">${formatCost(totalCost)}</strong></span>` : ''}
+    </div>
+  </div>`;
+
+  // Train visualization
+  html += '<div class="train-container" id="train-container">';
+  pipeline.stages.forEach((stage, i) => {
+    const taskCount = stage.tasks ? stage.tasks.length : 0;
+    const doneCount = stage.tasks ? stage.tasks.filter(t => t.status === 'done').length : 0;
+    const stageCost = stage.cost_usd || 0;
+
+    // Connector between cars
+    if (i > 0) {
+      const prevDone = pipeline.stages[i - 1].status === 'done';
+      html += `<div class="train-connector${prevDone ? ' active' : ''}" data-connector="${i}">
+        <div class="train-connector-line"><div class="train-connector-arrow"></div></div>
+      </div>`;
+    }
+
+    const selectedClass = selectedTrainStage === i ? ' selected' : '';
+    html += `<div class="train-car ${stage.status}${selectedClass}" data-stage="${i}" onclick="selectTrainStage(${i})">
+      <div class="train-car-header">
+        <span class="train-car-num">Stage ${i + 1}</span>
+        ${statusBadge(stage.status)}
+      </div>
+      <div class="train-car-name">${escapeHtml(stage.name)}</div>
+      <div class="train-car-stats">
+        <span>${taskCount} task${taskCount !== 1 ? 's' : ''}${doneCount > 0 && doneCount < taskCount ? ` (${doneCount} done)` : ''}</span>
+        ${stageCost > 0 ? `<span>${formatCost(stageCost)}</span>` : ''}
+      </div>
+      ${taskCount > 0 ? '<div class="train-car-expand">Click to view tasks</div>' : ''}
+    </div>`;
+  });
+  html += '</div>';
+
+  // Task breakdown panel placeholder
+  html += '<div id="train-tasks-panel"></div>';
+
+  // Overall summary section
+  html += '<div id="pipeline-summary-section" class="pipeline-summary-section" style="margin-top:20px"></div>';
+
+  // Pipeline config summary
+  html += `<details class="collapsible" style="margin-top:16px">
+    <summary>Pipeline Config</summary>
+    <div class="section-content">
+      <pre style="background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius);padding:14px;overflow-x:auto;font-size:0.8rem"><code class="language-json">${escapeHtml(JSON.stringify({
+        name: pipeline.name,
+        pipeline_file: pipeline.pipeline_file,
+        stages: pipeline.stages.map(s => ({
+          name: s.name,
+          status: s.status,
+          run_ids: s.run_ids,
+          task_files: s.task_files,
+          pass_outputs_to_next: s.pass_outputs_to_next
+        }))
+      }, null, 2))}</code></pre>
+    </div>
+  </details>`;
+
+  app.innerHTML = html;
+  if (window.hljs) {
+    app.querySelectorAll('pre code').forEach(b => hljs.highlightElement(b));
+  }
+
+  // Re-render task panel if a stage was selected
+  if (selectedTrainStage !== null) {
+    renderTrainTasksPanel(pipeline, selectedTrainStage);
+  }
+
+  // Load and render the summary section
+  loadPipelineSummary(pipelineId, pipeline);
+}
+
+async function loadPipelineSummary(pipelineId, pipeline) {
+  const section = document.getElementById('pipeline-summary-section');
+  if (!section) return;
+
+  // Check if pipeline is in a terminal state
+  const statuses = pipeline.stages.map(s => s.status);
+  const isTerminal = statuses.length > 0 && statuses.every(s => s === 'done' || s === 'failed' || s === 'skipped');
+
+  if (!isTerminal) {
+    section.innerHTML = '';
+    return;
+  }
+
+  // Check if summary exists
+  try {
+    const data = await api.getPipelineSummary(pipelineId);
+    if (data.summary) {
+      renderPipelineSummaryContent(section, data.summary);
+    } else {
+      renderPipelineSummaryButton(section, pipelineId);
+    }
+  } catch (e) {
+    renderPipelineSummaryButton(section, pipelineId);
+  }
+}
+
+function renderPipelineSummaryContent(section, summaryMd) {
+  section.innerHTML = `
+    <div class="pipeline-summary-card">
+      <div class="pipeline-summary-header">
+        <h3 style="margin:0;display:flex;align-items:center;gap:8px">
+          <span style="color:var(--accent)">Overall Summary</span>
+        </h3>
+      </div>
+      <div class="pipeline-summary-body markdown-body">${renderMarkdown(summaryMd)}</div>
+    </div>`;
+  highlightCodeBlocks(section);
+}
+
+function renderPipelineSummaryButton(section, pipelineId) {
+  section.innerHTML = `
+    <div class="pipeline-summary-card">
+      <div class="pipeline-summary-header">
+        <h3 style="margin:0;display:flex;align-items:center;gap:8px">
+          <span style="color:var(--accent)">Overall Summary</span>
+        </h3>
+      </div>
+      <div class="pipeline-summary-body" style="text-align:center;padding:24px">
+        <p style="color:var(--text-muted);margin:0 0 12px 0;font-size:0.85rem">No summary generated yet for this pipeline run.</p>
+        <button id="generate-summary-btn" class="btn btn-primary" onclick="generatePipelineSummary('${escapeHtml(pipelineId)}')">Generate summary</button>
+        <div id="summary-error" style="display:none;margin-top:12px;color:var(--red);font-size:0.8rem"></div>
+      </div>
+    </div>`;
+}
+
+async function generatePipelineSummary(pipelineId) {
+  const btn = document.getElementById('generate-summary-btn');
+  const errDiv = document.getElementById('summary-error');
+  if (!btn) return;
+
+  btn.disabled = true;
+  btn.textContent = 'Generating summary...';
+  if (errDiv) errDiv.style.display = 'none';
+
+  try {
+    const data = await api.generatePipelineSummary(pipelineId);
+    if (data.skipped) {
+      const section = document.getElementById('pipeline-summary-section');
+      if (section) {
+        section.innerHTML = `
+          <div class="pipeline-summary-card">
+            <div class="pipeline-summary-header">
+              <h3 style="margin:0;display:flex;align-items:center;gap:8px">
+                <span style="color:var(--accent)">Overall Summary</span>
+              </h3>
+            </div>
+            <div class="pipeline-summary-body" style="padding:16px;color:var(--text-muted);font-size:0.85rem">
+              No task output available — summary not generated.
+            </div>
+          </div>`;
+      }
+      return;
+    }
+    if (data.summary) {
+      const section = document.getElementById('pipeline-summary-section');
+      if (section) renderPipelineSummaryContent(section, data.summary);
+    }
+  } catch (e) {
+    btn.disabled = false;
+    btn.textContent = 'Generate summary';
+    if (errDiv) {
+      errDiv.textContent = `Error: ${e.message}. Click to retry.`;
+      errDiv.style.display = 'block';
+    }
+  }
+}
+
+function selectTrainStage(idx) {
+  const currentHash = location.hash;
+  const pipelineId = currentHash.match(/^#\/pipeline\/([^/]+)$/)?.[1];
+  if (!pipelineId) return;
+  const pipeline = cache.pipelineDetails[pipelineId];
+  if (!pipeline) return;
+
+  // Toggle selection
+  if (selectedTrainStage === idx) {
+    selectedTrainStage = null;
+    document.getElementById('train-tasks-panel').innerHTML = '';
+    document.querySelectorAll('.train-car').forEach(el => el.classList.remove('selected'));
+    return;
+  }
+
+  selectedTrainStage = idx;
+
+  // Update visual selection
+  document.querySelectorAll('.train-car').forEach(el => el.classList.remove('selected'));
+  const car = document.querySelector(`.train-car[data-stage="${idx}"]`);
+  if (car) car.classList.add('selected');
+
+  renderTrainTasksPanel(pipeline, idx);
+}
+
+function renderTrainTasksPanel(pipeline, stageIdx) {
+  const panel = document.getElementById('train-tasks-panel');
+  if (!panel) return;
+  const stage = pipeline.stages[stageIdx];
+  if (!stage) return;
+
+  const tasks = stage.tasks || [];
+  if (tasks.length === 0) {
+    panel.innerHTML = `<div class="train-tasks-panel">
+      <div class="train-tasks-header">
+        <h3>${escapeHtml(stage.name)}</h3>
+        ${statusBadge(stage.status)}
+      </div>
+      <div style="padding:16px;color:var(--text-muted);font-family:var(--mono);font-size:0.8rem">No tasks in this stage</div>
+    </div>`;
+    return;
+  }
+
+  const runLinks = (stage.run_ids || []).map(rid =>
+    `<a class="btn" href="#/run/${escapeHtml(rid)}" style="font-size:0.7rem;padding:3px 8px;margin-left:8px">View Run</a>`
+  ).join('');
+
+  let rows = '';
+  for (const t of tasks) {
+    const outputHref = t.run_id && t.id
+      ? `#/run/${escapeHtml(t.run_id)}/${escapeHtml(t.id)}/output`
+      : '';
+    rows += `<div class="train-task-row"${outputHref ? ` onclick="location.hash='${outputHref}'"` : ''}>
+      ${statusBadge(t.status)}
+      <span class="train-task-name">${escapeHtml(t.name)}</span>
+      ${t.cost_usd != null ? `<span class="train-task-cost">${formatCost(t.cost_usd)}</span>` : ''}
+      ${outputHref ? '<span class="train-task-link">View output</span>' : ''}
+    </div>`;
+  }
+
+  panel.innerHTML = `<div class="train-tasks-panel">
+    <div class="train-tasks-header">
+      <h3>${escapeHtml(stage.name)}</h3>
+      ${statusBadge(stage.status)}
+      ${stage.cost_usd != null ? `<span style="color:var(--text-muted);font-size:0.8rem;margin-left:auto">${formatCost(stage.cost_usd)}</span>` : ''}
+      ${runLinks}
+    </div>
+    <div class="train-tasks-list">${rows}</div>
+  </div>`;
+}
+
+function connectPipelineSSE(pipelineId, app) {
+  if (typeof EventSource === 'undefined') return;
+
+  try {
+    pipelineEventSource = new EventSource(`${API_BASE}/api/events`);
+
+    pipelineEventSource.onmessage = function(event) {
+      try {
+        const data = JSON.parse(event.data);
+        // Only handle events for this pipeline
+        if (data.pipeline_id !== pipelineId) return;
+
+        // Refresh pipeline data and re-render
+        cache.pipelineDetails[pipelineId] = null;
+        api.getPipeline(pipelineId).then(pipeline => {
+          cache.pipelineDetails[pipelineId] = pipeline;
+          // Only re-render if still on this pipeline view
+          if (location.hash === `#/pipeline/${pipelineId}`) {
+            renderPipelineTrainDOM(app, pipeline, pipelineId);
+          }
+        }).catch(() => {});
+      } catch (_) {}
+    };
+
+    pipelineEventSource.addEventListener('stage_update', function(event) {
+      try {
+        const data = JSON.parse(event.data);
+        if (data.pipeline_id !== pipelineId) return;
+        updateTrainCarStatus(data.stage_index, data.status);
+      } catch (_) {}
+    });
+
+    pipelineEventSource.addEventListener('task_update', function(event) {
+      try {
+        const data = JSON.parse(event.data);
+        if (data.pipeline_id !== pipelineId) return;
+        // Refresh full pipeline for task-level updates
+        cache.pipelineDetails[pipelineId] = null;
+        api.getPipeline(pipelineId).then(pipeline => {
+          cache.pipelineDetails[pipelineId] = pipeline;
+          if (location.hash === `#/pipeline/${pipelineId}`) {
+            renderPipelineTrainDOM(app, pipeline, pipelineId);
+          }
+        }).catch(() => {});
+      } catch (_) {}
+    });
+
+    pipelineEventSource.addEventListener('pipeline_summary_ready', function(event) {
+      try {
+        const data = JSON.parse(event.data);
+        if (data.pipeline_id !== pipelineId) return;
+        // Refresh summary section
+        const section = document.getElementById('pipeline-summary-section');
+        if (section) {
+          api.getPipelineSummary(pipelineId).then(result => {
+            if (result.summary) renderPipelineSummaryContent(section, result.summary);
+          }).catch(() => {});
+        }
+      } catch (_) {}
+    });
+
+    pipelineEventSource.addEventListener('pipeline_summary_error', function(event) {
+      try {
+        const data = JSON.parse(event.data);
+        if (data.pipeline_id !== pipelineId) return;
+        const section = document.getElementById('pipeline-summary-section');
+        if (section) renderPipelineSummaryButton(section, pipelineId);
+      } catch (_) {}
+    });
+
+    pipelineEventSource.onerror = function() {
+      // Silently close on error; user can refresh
+      if (pipelineEventSource) {
+        pipelineEventSource.close();
+        pipelineEventSource = null;
+      }
+    };
+  } catch (_) {
+    // EventSource not supported or connection failed — non-fatal
+  }
+}
+
+function updateTrainCarStatus(stageIdx, newStatus) {
+  const car = document.querySelector(`.train-car[data-stage="${stageIdx}"]`);
+  if (!car) return;
+  car.classList.remove('pending', 'running', 'done', 'failed');
+  car.classList.add(newStatus);
+  // Update badge inside the car
+  const badge = car.querySelector('.badge');
+  if (badge) {
+    badge.className = `badge badge-${newStatus}`;
+    badge.textContent = newStatus.toUpperCase();
+  }
+  // Update connector to the right if stage is done
+  if (newStatus === 'done') {
+    const nextConnector = document.querySelector(`.train-connector[data-connector="${stageIdx + 1}"]`);
+    if (nextConnector) nextConnector.classList.add('active');
+  }
+}
+
+// ── Pipeline Mapper ──
+let mapperEventSource = null;
+const mapperState = {
+  repos: null,
+  selectedRepo: null,
+  taskFiles: null,
+  selectedTaskFiles: [],  // Changed from selectedTasksFile (single) to array
+  pipelineTemplates: null,
+  selectedTemplate: null,
+  customStagesInput: '',  // User-provided custom stages
+  mappingId: null,
+  tasks: [],
+  stages: [],
+  assignments: {},       // task_id -> stage_index
+  executedTasks: new Set(),
+  selectedBatch: new Set(),
+  history: [],
+  selectAllMapped: false,
+  loadedTaskFiles: []    // Track files loaded from generate & map
+};
+
+async function renderMapperScreen() {
+  const app = $('#app');
+  setBreadcrumb({ text: 'Pipeline Mapper' });
+  app.innerHTML = '<div class="loading">Loading mapper...</div>';
+
+  try {
+    // Load repos if needed
+    if (!mapperState.repos) {
+      const data = await api.getRepos();
+      mapperState.repos = data.repos || [];
+    }
+    // Load pipeline templates if needed
+    if (!mapperState.pipelineTemplates) {
+      try { mapperState.pipelineTemplates = (await api.getPipelineTemplates()).templates || []; } catch (_) { mapperState.pipelineTemplates = []; }
+    }
+
+    let html = '';
+
+    // ── Setup Panel ──
+    const repoOptions = mapperState.repos.map(r =>
+      `<option value="${escapeHtml(r.path)}" ${mapperState.selectedRepo === r.path ? 'selected' : ''}>${escapeHtml(r.name)} (${escapeHtml(r.path)})</option>`
+    ).join('');
+
+    const templateOptions = mapperState.pipelineTemplates.map(t =>
+      `<option value="${escapeHtml(t.name)}" ${mapperState.selectedTemplate === t.name ? 'selected' : ''}>${escapeHtml(t.name)} — ${escapeHtml(t.description || '')}</option>`
+    ).join('') + '<option value="custom" ' + (mapperState.selectedTemplate === 'custom' ? 'selected' : '') + '>custom — Define your own stages</option>';
+
+    // Build task file options, excluding already selected files
+    const availableTaskFiles = (mapperState.taskFiles || []).filter(tf => 
+      !mapperState.selectedTaskFiles.includes(tf.path)
+    );
+    const taskFileOptions = availableTaskFiles.map(tf =>
+      `<option value="${escapeHtml(tf.path)}">${escapeHtml(tf.name)} (${tf.task_counts.total} tasks)${tf.is_markdown ? ' [MD]' : ''}</option>`
+    ).join('');
+
+    // Build selected files display (removable tags)
+    const selectedFilesHtml = mapperState.selectedTaskFiles.map(fp => {
+      const tf = (mapperState.taskFiles || []).find(t => t.path === fp);
+      const name = tf ? tf.name : fp.split('/').pop();
+      const taskCount = tf ? tf.task_counts.total : '?';
+      return `<span class="mapper-file-tag">
+        ${escapeHtml(name)} <span style="color:var(--text-dim)">(${taskCount})</span>
+        <button class="mapper-file-remove" onclick="mapperRemoveTaskFile('${escapeHtml(fp)}')" title="Remove">×</button>
+      </span>`;
+    }).join('');
+
+    html += `<div style="margin-bottom:28px;animation:stagger-in 0.5s ease-out">
+      <h1 class="hero-title" style="font-family:var(--display);font-size:2.5rem;font-weight:700;letter-spacing:-0.04em;line-height:1;color:var(--text);margin-bottom:4px">
+        <span style="color:var(--orange)">MAP</span><span style="color:var(--text-dim)">//</span>PER
+      </h1>
+      <p style="font-family:var(--mono);font-size:0.78rem;color:var(--text-dim);letter-spacing:0.06em;text-transform:uppercase">Drag tasks to pipeline stages</p>
+    </div>`;
+    html += `<div class="mapper-setup">
+      <h3>Pipeline Mapper</h3>
+      <div class="mapper-setup-row">
+        <div class="mapper-setup-field">
+          <label>Repository</label>
+          <select id="mapper-repo" onchange="mapperSelectRepo(this.value)">
+            <option value="">-- select repo --</option>
+            ${repoOptions}
+          </select>
+        </div>
+        <div class="mapper-setup-field">
+          <label>Tasks Files</label>
+          <div class="mapper-tasks-files">
+            <select id="mapper-tasks-file" ${!mapperState.taskFiles || availableTaskFiles.length === 0 ? 'disabled' : ''}>
+              <option value="">-- select file to add --</option>
+              ${taskFileOptions}
+            </select>
+            <button class="btn" onclick="mapperAddTaskFile()" ${!mapperState.taskFiles || availableTaskFiles.length === 0 ? 'disabled' : ''}>Add</button>
+          </div>
+          ${selectedFilesHtml ? `<div class="mapper-selected-files">${selectedFilesHtml}</div>` : ''}
+        </div>
+        <div class="mapper-setup-field">
+          <label>Pipeline Template</label>
+          <select id="mapper-template" onchange="mapperSelectTemplate(this.value)">
+            <option value="">-- select template --</option>
+            ${templateOptions}
+          </select>
+          ${mapperState.selectedTemplate === 'custom' ? `
+            <div class="mapper-custom-stages" style="margin-top:8px">
+              <label style="font-size:0.85rem">Custom Stages (comma-separated)</label>
+              <input type="text" id="mapper-custom-stages" class="form-input" placeholder="Plan, Implement, Review" style="width:100%;margin-top:4px" value="${escapeHtml(mapperState.customStagesInput || '')}">
+            </div>
+          ` : ''}
+        </div>
+        <button class="btn btn-primary" onclick="mapperCreateMapping()" ${mapperState.selectedTaskFiles.length === 0 || !mapperState.selectedTemplate ? 'disabled style="opacity:0.4"' : ''}>Create Mapping</button>
+      </div>
+    </div>`;
+
+    // ── Mapping Area (only shown after mapping is created) ──
+    if (mapperState.mappingId && mapperState.stages.length > 0) {
+      html += mapperRenderMappingArea();
+      html += mapperRenderBatchBar();
+      html += mapperRenderHistory();
+    } else if (mapperState.mappingId) {
+      html += '<div style="color:var(--text-muted);font-family:var(--mono);padding:40px;text-align:center">No stages found in the selected template.</div>';
+    }
+
+    app.innerHTML = html;
+
+    // Attach drag-and-drop listeners after DOM is rendered
+    if (mapperState.mappingId) {
+      mapperAttachDragDrop();
+    }
+  } catch (e) {
+    app.innerHTML = `<div class="error-banner">Error: ${e.message}</div>`;
+  }
+}
+
+async function mapperSelectRepo(repoPath) {
+  mapperState.selectedRepo = repoPath || null;
+  mapperState.taskFiles = null;
+  mapperState.selectedTaskFiles = [];
+  mapperResetMapping();
+
+  if (repoPath) {
+    try {
+      const data = await api.getRepoTasks(repoPath);
+      mapperState.taskFiles = data.task_files || [];
+      
+      // Auto-select files that were loaded from generate & map
+      if (mapperState.loadedTaskFiles && mapperState.loadedTaskFiles.length > 0) {
+        mapperState.selectedTaskFiles = mapperState.loadedTaskFiles.filter(fp => 
+          mapperState.taskFiles.some(tf => tf.path === fp)
+        );
+        mapperState.loadedTaskFiles = [];  // Clear after use
+      }
+    } catch (_) {
+      mapperState.taskFiles = [];
+    }
+  }
+  renderMapperScreen();
+}
+
+function mapperAddTaskFile() {
+  const select = document.getElementById('mapper-tasks-file');
+  if (!select || !select.value) return;
+  
+  const filePath = select.value;
+  if (!mapperState.selectedTaskFiles.includes(filePath)) {
+    mapperState.selectedTaskFiles.push(filePath);
+    mapperResetMapping();
+  }
+  renderMapperScreen();
+}
+
+function mapperRemoveTaskFile(filePath) {
+  mapperState.selectedTaskFiles = mapperState.selectedTaskFiles.filter(fp => fp !== filePath);
+  mapperResetMapping();
+  renderMapperScreen();
+}
+
+function mapperSelectTasksFile(filePath) {
+  // Legacy function - now adds to the array instead of replacing
+  if (filePath && !mapperState.selectedTaskFiles.includes(filePath)) {
+    mapperState.selectedTaskFiles = [filePath];
+  } else if (!filePath) {
+    mapperState.selectedTaskFiles = [];
+  }
+  mapperResetMapping();
+  renderMapperScreen();
+}
+
+function mapperSelectTemplate(template) {
+  // Save custom stages input before changing template
+  const customStagesEl = document.getElementById('mapper-custom-stages');
+  if (customStagesEl) {
+    mapperState.customStagesInput = customStagesEl.value;
+  }
+  mapperState.selectedTemplate = template || null;
+  renderMapperScreen();  // Re-render to show/hide custom stages input
+}
+
+function mapperUpdateCreateButton() {
+  const createBtn = document.querySelector('.mapper-setup .btn-primary');
+  if (createBtn) {
+    const enabled = mapperState.selectedTaskFiles.length > 0 && mapperState.selectedTemplate;
+    createBtn.disabled = !enabled;
+    createBtn.style.opacity = enabled ? '' : '0.4';
+  }
+}
+
+function mapperResetMapping() {
+  mapperState.mappingId = null;
+  mapperState.tasks = [];
+  mapperState.stages = [];
+  mapperState.assignments = {};
+  mapperState.executedTasks = new Set();
+  mapperState.selectedBatch = new Set();
+  mapperState.history = [];
+  mapperState.selectAllMapped = false;
+  if (mapperEventSource) {
+    mapperEventSource.close();
+    mapperEventSource = null;
+  }
+}
+
+async function mapperCreateMapping() {
+  if (mapperState.selectedTaskFiles.length === 0 || !mapperState.selectedTemplate) return;
+
+  // Read template selection fresh from DOM
+  const templateEl = document.getElementById('mapper-template');
+  if (templateEl) mapperState.selectedTemplate = templateEl.value;
+  if (!mapperState.selectedTemplate) { alert('Select a pipeline template'); return; }
+
+  // Get custom stages if template is "custom"
+  let customStages = null;
+  if (mapperState.selectedTemplate === 'custom') {
+    const customStagesEl = document.getElementById('mapper-custom-stages');
+    if (customStagesEl && customStagesEl.value.trim()) {
+      customStages = customStagesEl.value.split(',').map(s => s.trim()).filter(Boolean);
+      mapperState.customStagesInput = customStagesEl.value;  // Save for re-render
+    }
+  }
+
+  try {
+    const result = await api.createMapping(mapperState.selectedTaskFiles, mapperState.selectedTemplate, customStages);
+    mapperState.mappingId = result.mapping_id;
+    mapperState.tasks = result.tasks || [];
+    mapperState.stages = result.stages || [];
+    mapperState.assignments = result.auto_assignments || {};
+    mapperState.executedTasks = new Set();
+    mapperState.selectedBatch = new Set();
+    mapperState.history = [];
+
+    // Connect SSE for live updates
+    mapperConnectSSE();
+
+    // Load history
+    mapperLoadHistory();
+
+    renderMapperScreen();
+  } catch (e) {
+    alert('Create mapping failed: ' + e.message);
+  }
+}
+
+function mapperRenderMappingArea() {
+  const assigned = mapperState.assignments;
+  const assignedTaskIds = new Set(Object.keys(assigned));
+
+  // Left column: available tasks
+  let leftCards = '';
+  for (const task of mapperState.tasks) {
+    const isMapped = assignedTaskIds.has(task.id);
+    const isExecuted = mapperState.executedTasks.has(task.id);
+    const ghostClass = isMapped ? ' mapped-ghost' : '';
+    const execClass = isExecuted ? ' executed' : '';
+    const draggable = isMapped ? '' : 'draggable="true"';
+    const mappedBadge = isMapped ? '<span class="badge badge-pending" style="font-size:0.6rem">mapped</span>' : '';
+    const unmappedBadge = (!isMapped && !isExecuted) ? '<span style="font-size:0.6rem;color:var(--text-dim)">unmapped</span>' : '';
+    const execBadge = isExecuted ? '<span class="badge badge-done" style="font-size:0.6rem">&#10003; executed</span>' : '';
+
+    leftCards += `<div class="mapper-task${ghostClass}${execClass}" ${draggable} data-task-id="${escapeHtml(task.id)}">
+      <div class="mapper-task-header">
+        <span class="mapper-task-name">${escapeHtml(task.name)}</span>
+        ${execBadge}${mappedBadge}${unmappedBadge}
+      </div>
+      <div class="mapper-task-meta">
+        ${modelBadge(task.model)}
+        ${(task.agents || '').split(',').filter(Boolean).map(a => `<span class="tag">${escapeHtml(a.trim())}</span>`).join('')}
+      </div>
+    </div>`;
+  }
+
+  const unmappedCount = mapperState.tasks.length - assignedTaskIds.size;
+
+  // Right column: pipeline stages with drop zones
+  let stageCards = '';
+  for (let i = 0; i < mapperState.stages.length; i++) {
+    const stage = mapperState.stages[i];
+    const stageName = typeof stage === 'string' ? stage : (stage.name || `Stage ${i + 1}`);
+
+    // Collect tasks assigned to this stage
+    const stageTasks = mapperState.tasks.filter(t => assigned[t.id] === i);
+
+    let stageTaskHtml = '';
+    if (stageTasks.length === 0) {
+      stageTaskHtml = '<div class="mapper-drop-zone-empty">Drop tasks here</div>';
+    } else {
+      for (const t of stageTasks) {
+        const isExecuted = mapperState.executedTasks.has(t.id);
+        const isSelected = mapperState.selectedBatch.has(t.id);
+        stageTaskHtml += `<div class="mapper-task${isExecuted ? ' executed' : ''}" data-task-id="${escapeHtml(t.id)}" style="cursor:default">
+          <div class="mapper-task-header">
+            <input type="checkbox" ${isSelected ? 'checked' : ''} onchange="mapperToggleBatchTask('${escapeHtml(t.id)}', this.checked)" style="accent-color:var(--accent)">
+            <span class="mapper-task-name">${escapeHtml(t.name)}</span>
+            ${isExecuted ? '<span class="badge badge-done" style="font-size:0.6rem">&#10003; executed</span>' : ''}
+            ${modelBadge(t.model)}
+            <button class="mapper-task-remove" onclick="mapperUnassignTask('${escapeHtml(t.id)}')" title="Unassign">&times;</button>
+          </div>
+        </div>`;
+      }
+    }
+
+    stageCards += `<div class="mapper-stage">
+      <div class="mapper-stage-header">
+        <span class="stage-num">Stage ${i + 1}</span>
+        <span>${escapeHtml(stageName)}</span>
+        <span class="count">${stageTasks.length} task${stageTasks.length !== 1 ? 's' : ''}</span>
+      </div>
+      <div class="mapper-drop-zone" data-stage-index="${i}">
+        ${stageTaskHtml}
+      </div>
+    </div>`;
+  }
+
+  const mappedCount = assignedTaskIds.size;
+
+  return `<div class="mapper-columns">
+    <div class="mapper-col">
+      <div class="mapper-col-header">Available Tasks <span class="count">${unmappedCount} unmapped / ${mapperState.tasks.length} total</span></div>
+      <div id="mapper-available-tasks">${leftCards}</div>
+    </div>
+    <div class="mapper-col">
+      <div class="mapper-col-header">Pipeline Stages <span class="count">${mappedCount} mapped</span></div>
+      <div id="mapper-stages">${stageCards}</div>
+    </div>
+  </div>`;
+}
+
+function mapperRenderBatchBar() {
+  const assigned = mapperState.assignments;
+  const mappedCount = Object.keys(assigned).length;
+  const selectedCount = mapperState.selectedBatch.size;
+
+  return `<div class="mapper-batch-bar">
+    <button class="btn" onclick="mapperSelectAllMapped()">${mapperState.selectAllMapped ? 'Deselect All' : 'Select All Mapped'}</button>
+    <div class="mapper-batch-info"><strong>${selectedCount}</strong> of <strong>${mappedCount}</strong> tasks selected for this batch</div>
+    <button class="btn" onclick="mapperClearMapping()" ${mappedCount === 0 ? 'disabled style="opacity:0.4"' : ''}>Clear Mapping</button>
+    <button class="btn btn-primary" onclick="mapperExecuteBatch()" ${selectedCount === 0 ? 'disabled style="opacity:0.4"' : ''}>Execute Batch</button>
+  </div>`;
+}
+
+function mapperRenderHistory() {
+  if (mapperState.history.length === 0) return '';
+
+  let items = '';
+  for (const batch of mapperState.history) {
+    const statusCls = batch.status === 'completed' ? 'badge-done' : batch.status === 'running' ? 'badge-running' : batch.status === 'failed' ? 'badge-failed' : 'badge-pending';
+    const taskCount = (batch.task_ids || []).length;
+    const timeStr = batch.started_at ? formatDate(batch.started_at) + ' ' + formatTime(batch.started_at) : '';
+    items += `<div class="mapper-history-item">
+      <span class="badge ${statusCls}">${batch.status || 'unknown'}</span>
+      <span style="color:var(--text-muted);font-size:0.75rem">${timeStr}</span>
+      <span style="flex:1">${taskCount} task${taskCount !== 1 ? 's' : ''}</span>
+      ${batch.run_id ? `<a href="#/run/${escapeHtml(batch.run_id)}">View Run</a>` : ''}
+      ${batch.pipeline_id ? `<a href="#/pipeline/${escapeHtml(batch.pipeline_id)}">View Pipeline</a>` : ''}
+    </div>`;
+  }
+
+  return `<details class="mapper-history" ${mapperState.history.length > 0 ? 'open' : ''}>
+    <summary>Batch History (${mapperState.history.length})</summary>
+    <div class="mapper-history-list">${items}</div>
+  </details>`;
+}
+
+// ── Drag & Drop ──
+function mapperAttachDragDrop() {
+  // Make available tasks draggable
+  document.querySelectorAll('#mapper-available-tasks .mapper-task[draggable="true"]').forEach(el => {
+    el.addEventListener('dragstart', mapperDragStart);
+    el.addEventListener('dragend', mapperDragEnd);
+  });
+
+  // Make drop zones accept drops
+  document.querySelectorAll('.mapper-drop-zone').forEach(zone => {
+    zone.addEventListener('dragover', mapperDragOver);
+    zone.addEventListener('dragleave', mapperDragLeave);
+    zone.addEventListener('drop', mapperDrop);
+  });
+}
+
+function mapperDragStart(e) {
+  const taskId = e.currentTarget.dataset.taskId;
+  e.dataTransfer.setData('text/plain', taskId);
+  e.dataTransfer.effectAllowed = 'move';
+  e.currentTarget.classList.add('dragging');
+}
+
+function mapperDragEnd(e) {
+  e.currentTarget.classList.remove('dragging');
+  // Clean up all drag-over highlights
+  document.querySelectorAll('.mapper-drop-zone.drag-over').forEach(z => z.classList.remove('drag-over'));
+}
+
+function mapperDragOver(e) {
+  e.preventDefault();
+  e.dataTransfer.dropEffect = 'move';
+  e.currentTarget.classList.add('drag-over');
+}
+
+function mapperDragLeave(e) {
+  // Only remove highlight if we truly left the drop zone
+  // relatedTarget may be null when dragging outside the window
+  if (!e.relatedTarget || !e.currentTarget.contains(e.relatedTarget)) {
+    e.currentTarget.classList.remove('drag-over');
+  }
+}
+
+async function mapperDrop(e) {
+  e.preventDefault();
+  e.currentTarget.classList.remove('drag-over');
+
+  const taskId = e.dataTransfer.getData('text/plain');
+  const stageIndex = parseInt(e.currentTarget.dataset.stageIndex, 10);
+
+  if (!taskId || isNaN(stageIndex) || !mapperState.mappingId) return;
+
+  // Validate the task exists and is not already assigned
+  const task = mapperState.tasks.find(t => t.id === taskId);
+  if (!task || mapperState.assignments.hasOwnProperty(taskId)) return;
+
+  try {
+    await api.assignTask(mapperState.mappingId, taskId, stageIndex);
+    mapperState.assignments[taskId] = stageIndex;
+    mapperRefreshDOM();
+  } catch (err) {
+    alert('Assign failed: ' + err.message);
+  }
+}
+
+async function mapperUnassignTask(taskId) {
+  if (!mapperState.mappingId) return;
+  try {
+    await api.unassignTask(mapperState.mappingId, taskId);
+    delete mapperState.assignments[taskId];
+    mapperState.selectedBatch.delete(taskId);
+    mapperRefreshDOM();
+  } catch (err) {
+    alert('Unassign failed: ' + err.message);
+  }
+}
+
+function mapperToggleBatchTask(taskId, checked) {
+  if (checked) {
+    mapperState.selectedBatch.add(taskId);
+  } else {
+    mapperState.selectedBatch.delete(taskId);
+    mapperState.selectAllMapped = false;
+  }
+  // Update batch bar (count + button states) without full re-render
+  const batchBar = document.querySelector('.mapper-batch-bar');
+  if (batchBar) {
+    const newBar = document.createElement('div');
+    newBar.innerHTML = mapperRenderBatchBar();
+    batchBar.replaceWith(newBar.firstElementChild);
+  }
+  // Sync Select All toggle state if all mapped are now selected
+  const mappedCount = Object.keys(mapperState.assignments).length;
+  if (mapperState.selectedBatch.size === mappedCount && mappedCount > 0) {
+    mapperState.selectAllMapped = true;
+  }
+}
+
+function mapperSelectAllMapped() {
+  mapperState.selectAllMapped = !mapperState.selectAllMapped;
+  if (mapperState.selectAllMapped) {
+    Object.keys(mapperState.assignments).forEach(id => mapperState.selectedBatch.add(id));
+  } else {
+    mapperState.selectedBatch.clear();
+  }
+  mapperRefreshDOM();
+}
+
+async function mapperClearMapping() {
+  if (!mapperState.mappingId) return;
+  const taskIds = Object.keys(mapperState.assignments);
+  if (taskIds.length === 0) return;
+
+  for (const taskId of taskIds) {
+    try {
+      await api.unassignTask(mapperState.mappingId, taskId);
+    } catch (_) {}
+  }
+  mapperState.assignments = {};
+  mapperState.selectedBatch.clear();
+  mapperState.selectAllMapped = false;
+  mapperRefreshDOM();
+}
+
+async function mapperExecuteBatch() {
+  if (!mapperState.mappingId || mapperState.selectedBatch.size === 0) return;
+
+  const taskIds = [...mapperState.selectedBatch];
+  try {
+    const result = await api.executeMapping(mapperState.mappingId, taskIds);
+    // Mark executed tasks
+    taskIds.forEach(id => mapperState.executedTasks.add(id));
+    mapperState.selectedBatch.clear();
+    mapperState.selectAllMapped = false;
+
+    // Refresh history
+    await mapperLoadHistory();
+    mapperRefreshDOM();
+
+    alert(`Batch started! Run ID: ${result.run_id || 'unknown'}`);
+  } catch (e) {
+    alert('Execute batch failed: ' + e.message);
+  }
+}
+
+async function mapperLoadHistory() {
+  if (!mapperState.mappingId) return;
+  try {
+    const data = await api.getMappingHistory(mapperState.mappingId);
+    mapperState.history = Array.isArray(data) ? data : (data.batches || []);
+    // Mark executed task IDs from completed batches
+    for (const batch of mapperState.history) {
+      if (batch.status === 'completed') {
+        (batch.task_ids || []).forEach(id => mapperState.executedTasks.add(id));
+      }
+    }
+  } catch (_) {
+    mapperState.history = [];
+  }
+}
+
+function mapperRefreshDOM() {
+  // Surgically update the mapping area, batch bar, and history
+  const app = $('#app');
+  if (!app || !mapperState.mappingId) return;
+
+  // Update mapping columns
+  const columnsEl = app.querySelector('.mapper-columns');
+  if (columnsEl) {
+    const newCols = document.createElement('div');
+    newCols.innerHTML = mapperRenderMappingArea();
+    columnsEl.replaceWith(newCols.firstElementChild);
+  }
+
+  // Update batch bar
+  const batchBar = app.querySelector('.mapper-batch-bar');
+  if (batchBar) {
+    const newBar = document.createElement('div');
+    newBar.innerHTML = mapperRenderBatchBar();
+    batchBar.replaceWith(newBar.firstElementChild);
+  }
+
+  // Update history
+  const historyEl = app.querySelector('.mapper-history');
+  const historyHtml = mapperRenderHistory();
+  if (historyEl && historyHtml) {
+    const newHistory = document.createElement('div');
+    newHistory.innerHTML = historyHtml;
+    historyEl.replaceWith(newHistory.firstElementChild);
+  } else if (!historyEl && historyHtml) {
+    const batchBarNew = app.querySelector('.mapper-batch-bar');
+    if (batchBarNew) {
+      batchBarNew.insertAdjacentHTML('afterend', historyHtml);
+    }
+  }
+
+  // Re-attach drag-and-drop listeners
+  mapperAttachDragDrop();
+}
+
+// ── Mapper SSE ──
+function mapperConnectSSE() {
+  if (typeof EventSource === 'undefined' || !mapperState.mappingId) return;
+  if (mapperEventSource) { mapperEventSource.close(); mapperEventSource = null; }
+
+  try {
+    mapperEventSource = new EventSource(`${API_BASE}/api/events`);
+
+    mapperEventSource.addEventListener('batch_started', function(event) {
+      try {
+        const data = JSON.parse(event.data);
+        if (data.mapping_id !== mapperState.mappingId) return;
+        mapperLoadHistory().then(() => mapperRefreshDOM());
+      } catch (_) {}
+    });
+
+    mapperEventSource.addEventListener('batch_completed', function(event) {
+      try {
+        const data = JSON.parse(event.data);
+        if (data.mapping_id !== mapperState.mappingId) return;
+        // Mark tasks as executed
+        (data.task_ids || []).forEach(id => mapperState.executedTasks.add(id));
+        mapperLoadHistory().then(() => mapperRefreshDOM());
+      } catch (_) {}
+    });
+
+    // Also listen for generic messages
+    mapperEventSource.onmessage = function(event) {
+      try {
+        const data = JSON.parse(event.data);
+        if (data.mapping_id !== mapperState.mappingId) return;
+        if (data.type === 'batch_started' || data.type === 'batch_completed') {
+          if (data.type === 'batch_completed') {
+            (data.task_ids || []).forEach(id => mapperState.executedTasks.add(id));
+          }
+          mapperLoadHistory().then(() => mapperRefreshDOM());
+        }
+      } catch (_) {}
+    };
+
+    mapperEventSource.onerror = function() {
+      if (mapperEventSource) { mapperEventSource.close(); mapperEventSource = null; }
+    };
+  } catch (_) {}
+}
+
+async function wsGenerateAndMap() {
+  const promptEl = $('#ws-brainstorm-prompt');
+  const modelEl = $('#ws-brainstorm-model');
+  const modeEl = $('#ws-brainstorm-mode');
+  const templateEl = $('#ws-bs-map-template');
+  const stagesEl = $('#ws-bs-stages');  // Custom stages input (for pipeline-custom mode)
+  if (!promptEl?.value.trim()) { alert('Enter a prompt describing what you want to build'); return; }
+  if (!wsState.selectedRepo) { alert('Select a repository first'); return; }
+  // Check mode - if pipeline-custom, use "custom" template and get stages
+  const mode = modeEl?.value || 'orchestra';
+  const pipelineTemplate = mode === 'pipeline-custom' ? 'custom' : (templateEl?.value || 'feature');
+  
+  // Get custom stages if in pipeline-custom mode
+  let customStages = null;
+  if (mode === 'pipeline-custom' && stagesEl?.value.trim()) {
+    customStages = stagesEl.value.split(',').map(s => s.trim()).filter(Boolean);
+  }
+  
+  const panel = promptEl.closest('.ws-brainstorm');
+  panel.classList.add('loading');
+  wsSetProgress('Generating tasks and creating mapping...');
+  try {
+    const result = await api.brainstormToMapping(
+      wsState.selectedRepo,
+      promptEl.value.trim(),
+      pipelineTemplate,
+      modelEl?.value || 'sonnet',
+      customStages
+    );
+    wsSetProgress('');
+    // Populate mapper state with the returned data
+    mapperState.mappingId = result.mapping_id;
+    mapperState.tasks = result.tasks || [];
+    mapperState.stages = result.stages || [];
+    mapperState.assignments = result.auto_assignments || {};
+    mapperState.executedTasks = new Set();
+    mapperState.selectedBatch = new Set();
+    mapperState.history = [];
+    mapperState.selectAllMapped = false;
+    // Track the generated tasks file
+    if (result.tasks_file) {
+      mapperState.loadedTaskFiles = [result.tasks_file];
+    }
+    // Navigate to the Pipeline Mapper tab
+    location.hash = '#/mapper';
+  } catch (e) {
+    wsSetProgress('');
+    alert('Generate & Map failed: ' + e.message);
+  } finally {
+    panel.classList.remove('loading');
+  }
+}
+
+// ── Init ──
+window.addEventListener('hashchange', route);
+window.addEventListener('DOMContentLoaded', route);
+</script>
+</body>
+</html>

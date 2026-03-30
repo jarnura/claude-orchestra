@@ -1,0 +1,536 @@
+#!/usr/bin/env bash
+set -eo pipefail
+
+# claude-orchestra multi-stage pipeline runner
+# Reads a pipeline JSON config and runs stages sequentially,
+# with tasks within each stage running in parallel.
+# Enhanced: supports pass_outputs_to_next, aggregate, and task filtering.
+#
+# Usage: orchestra-pipeline [OPTIONS] <pipeline.json>
+#
+# Options:
+#   --name NAME              Override pipeline name for log directory
+#   --filter-tasks TASKS     Comma-separated list of task IDs to execute
+#                            (runs only specified tasks, skips others)
+#   --filter-stages STAGES   Comma-separated list of stage names to execute
+#                            (runs only specified stages, skips others)
+
+SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
+
+# Parse arguments
+PIPELINE_FILE=""
+PIPELINE_NAME_OVERRIDE=""
+FILTER_TASKS=""
+FILTER_STAGES=""
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --name)
+            PIPELINE_NAME_OVERRIDE="$2"
+            shift 2
+            ;;
+        --name=*)
+            PIPELINE_NAME_OVERRIDE="${1#--name=}"
+            shift
+            ;;
+        --filter-tasks)
+            FILTER_TASKS="$2"
+            shift 2
+            ;;
+        --filter-tasks=*)
+            FILTER_TASKS="${1#--filter-tasks=}"
+            shift
+            ;;
+        --filter-stages)
+            FILTER_STAGES="$2"
+            shift 2
+            ;;
+        --filter-stages=*)
+            FILTER_STAGES="${1#--filter-stages=}"
+            shift
+            ;;
+        *)
+            if [[ -z "$PIPELINE_FILE" ]]; then
+                PIPELINE_FILE="$1"
+            fi
+            shift
+            ;;
+    esac
+done
+
+if [[ -z "$PIPELINE_FILE" ]]; then
+    echo "Usage: orchestra-pipeline [OPTIONS] <pipeline.json>"
+    echo ""
+    echo "Options:"
+    echo "  --name NAME              Override pipeline name for log directory"
+    echo "  --filter-tasks TASKS     Comma-separated list of task IDs to execute"
+    echo "                           (runs only specified tasks, skips others)"
+    echo "  --filter-stages STAGES   Comma-separated list of stage names to execute"
+    echo "                           (runs only specified stages, skips others)"
+    echo ""
+    echo "Pipeline JSON format:"
+    echo '  {'
+    echo '    "name": "Pipeline Name",'
+    echo '    "stages": ['
+    echo '      {'
+    echo '        "name": "Audit",'
+    echo '        "tasks": [{"file": "tasks.json", "max_parallel": 10}],'
+    echo '        "pass_outputs_to_next": true'
+    echo '      }'
+    echo '    ],'
+    echo '    "aggregate": true'
+    echo '  }'
+    exit 1
+fi
+
+if [[ ! -f "$PIPELINE_FILE" ]]; then
+    echo "Pipeline file not found: $PIPELINE_FILE"
+    exit 1
+fi
+
+log() { echo "[$(date '+%H:%M:%S')] $*"; }
+
+# Build FILTER_TASK_IDS associative array for O(1) lookups
+declare -A FILTER_TASK_IDS=()
+if [[ -n "$FILTER_TASKS" ]]; then
+    IFS=',' read -ra _filter_ids <<< "$FILTER_TASKS"
+    for _id in "${_filter_ids[@]}"; do
+        _id="${_id// /}"  # trim whitespace
+        [[ -n "$_id" ]] && FILTER_TASK_IDS["$_id"]=1
+    done
+fi
+
+# Helper: check if a stage name should be included in filter
+should_run_stage() {
+    local stage_name="$1"
+    [[ -z "$FILTER_STAGES" ]] && return 0  # No filter = run all
+    # Split comma-separated list and check if stage_name is in list
+    echo ",$FILTER_STAGES," | grep -q ",$stage_name," && return 0
+    return 1
+}
+
+# Track temp files for cleanup on exit
+_PIPELINE_TMPFILES=()
+pipeline_cleanup() {
+    for f in "${_PIPELINE_TMPFILES[@]}"; do
+        rm -f "$f"
+    done
+}
+trap pipeline_cleanup EXIT
+
+# inject_prior_outputs(tasks_file, prior_log_dir)
+# Reads outputs from prior stage and appends them to task prompts
+inject_prior_outputs() {
+    local tasks_file="$1"
+    local prior_log_dir="$2"
+
+    [[ -d "$prior_log_dir" ]] || return 0
+
+    # Collect all .output.md files from prior stage
+    local context=""
+    for output_file in "$prior_log_dir"/*.output.md; do
+        [[ -f "$output_file" ]] || continue
+        local task_name
+        task_name=$(basename "$output_file" .output.md)
+        # Take first 2000 chars to avoid context overload
+        local excerpt
+        excerpt=$(head -c 2000 "$output_file")
+        context+=$'\n\n## Prior Stage Output: '"$task_name"$'\n'"$excerpt"
+    done
+
+    [[ -z "$context" ]] && return 0
+
+    # Append context to each task's prompt
+    local tmp
+    tmp=$(mktemp)
+    jq --arg ctx "$context" '
+        .tasks[] |= (.prompt = .prompt + "\n\n# Context from Prior Stage\n" + $ctx)
+    ' "$tasks_file" > "$tmp" && mv "$tmp" "$tasks_file" || rm -f "$tmp"
+
+    log "Injected prior stage outputs into $(jq '.tasks | length' "$tasks_file") tasks"
+}
+
+# find_log_dir(tasks_file)
+# Find the most recent log directory for a tasks file
+find_log_dir_for_file() {
+    local tasks_file="$1"
+    local tasks_dir
+    tasks_dir=$(dirname "$tasks_file")
+
+    # Look for most recent state.json in logs/
+    for base in "$tasks_dir" "."; do
+        local latest
+        latest=$(ls -td "$base"/logs/*/state.json 2>/dev/null | head -1)
+        if [[ -n "$latest" ]]; then
+            dirname "$latest"
+            return 0
+        fi
+    done
+    return 1
+}
+
+wait_for_batches() {
+    local label="$1"
+    shift
+    local files=("$@")
+
+    log "Waiting for $label to complete..."
+    while true; do
+        local total_remaining=0
+        local total_done=0
+        local total_failed=0
+        local total_tasks=0
+
+        for f in "${files[@]}"; do
+            local r=$(jq '[.tasks[] | select(.status == "pending" or .status == "running" or .status == "retrying" or .status == "verifying")] | length' "$f")
+            local d=$(jq '[.tasks[] | select(.status == "done")] | length' "$f")
+            local fl=$(jq '[.tasks[] | select(.status == "failed")] | length' "$f")
+            local t=$(jq '.tasks | length' "$f")
+            total_remaining=$((total_remaining + r))
+            total_done=$((total_done + d))
+            total_failed=$((total_failed + fl))
+            total_tasks=$((total_tasks + t))
+        done
+
+        log "$label: $total_done/$total_tasks done, $total_failed failed, $total_remaining remaining"
+
+        if [[ $total_remaining -eq 0 ]]; then
+            log "=== $label COMPLETE -- $total_done done, $total_failed failed ==="
+            return 0
+        fi
+
+        sleep "${PIPELINE_POLL_INTERVAL:-${POLL_INTERVAL:-10}}"
+    done
+}
+
+PIPELINE_NAME=$(jq -r '.name // "Unnamed Pipeline"' "$PIPELINE_FILE")
+STAGE_COUNT=$(jq '.stages | length' "$PIPELINE_FILE")
+AGGREGATE=$(jq -r '.aggregate // false' "$PIPELINE_FILE")
+HALT_ON_FAILURE=$(jq -r '.halt_on_stage_failure // true' "$PIPELINE_FILE")
+
+# Apply name override if provided
+if [[ -n "$PIPELINE_NAME_OVERRIDE" ]]; then
+    PIPELINE_NAME="$PIPELINE_NAME_OVERRIDE"
+fi
+
+# ── Pipeline state tracking ──────────────────────────────────────────────────
+# Create slug from pipeline name for human-readable IDs
+PIPELINE_NAME_SLUG=$(echo "$PIPELINE_NAME" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/-/g' | sed 's/-\+/-/g' | sed 's/^-\|-$//g' | cut -c1-40)
+PIPELINE_ID="${PIPELINE_NAME_SLUG}"
+# Use LOGS_BASE from environment if set (passed by orchestra-serve), otherwise use $(pwd)/logs
+if [[ -z "$LOGS_BASE" ]]; then
+    LOGS_BASE="$(pwd)/logs"
+fi
+mkdir -p "$LOGS_BASE"
+PIPELINE_STATE_FILE="$LOGS_BASE/${PIPELINE_ID}.json"
+
+# Write initial pipeline state
+PIPELINE_STAGES_INIT=$(jq '[.stages | to_entries[] | {
+    name: .value.name,
+    index: .key,
+    status: "pending",
+    run_ids: [],
+    task_files: [.value.tasks[].file],
+    pass_outputs_to_next: (.value.pass_outputs_to_next // false),
+    stage_attempt: 1,
+    max_stage_attempts: ((.value.max_stage_retries // 0) + 1)
+}]' "$PIPELINE_FILE")
+
+jq -n \
+    --arg id "$PIPELINE_ID" \
+    --arg name "$PIPELINE_NAME" \
+    --argjson started_at "$(date +%s)" \
+    --arg pf "$(realpath "$PIPELINE_FILE" 2>/dev/null || echo "$PIPELINE_FILE")" \
+    --argjson stages "$PIPELINE_STAGES_INIT" \
+    --argjson halt "$HALT_ON_FAILURE" \
+    '{id: $id, name: $name, started_at: $started_at, pipeline_file: $pf, halt_on_stage_failure: $halt, halted_at_stage: null, stages: $stages}' \
+    > "$PIPELINE_STATE_FILE"
+
+update_pipeline_stage() {
+    local idx="$1" status="$2"
+    shift 2
+    local run_ids_json="[]"
+    if [[ $# -gt 0 ]]; then
+        run_ids_json=$(printf '%s\n' "$@" | jq -R . | jq -s .)
+    fi
+    local tmp
+    tmp=$(mktemp)
+    jq --argjson idx "$idx" --arg status "$status" --argjson run_ids "$run_ids_json" '
+        .stages[$idx].status = $status |
+        .stages[$idx].run_ids = $run_ids
+    ' "$PIPELINE_STATE_FILE" > "$tmp" && mv "$tmp" "$PIPELINE_STATE_FILE" || rm -f "$tmp"
+}
+
+update_pipeline_stage_attempt() {
+    local idx="$1" attempt="$2"
+    local tmp
+    tmp=$(mktemp)
+    jq --argjson idx "$idx" --argjson attempt "$attempt" '
+        .stages[$idx].stage_attempt = $attempt
+    ' "$PIPELINE_STATE_FILE" > "$tmp" && mv "$tmp" "$PIPELINE_STATE_FILE" || rm -f "$tmp"
+}
+
+update_pipeline_halted() {
+    local stage_idx="$1"
+    local tmp
+    tmp=$(mktemp)
+    jq --argjson idx "$stage_idx" '
+        .halted_at_stage = $idx
+    ' "$PIPELINE_STATE_FILE" > "$tmp" && mv "$tmp" "$PIPELINE_STATE_FILE" || rm -f "$tmp"
+}
+
+# reset_failed_tasks(tasks_file)
+# Reset only failed tasks back to pending (preserves done tasks)
+reset_failed_tasks() {
+    local tasks_file="$1"
+    local tmp
+    tmp=$(mktemp)
+    jq '(.tasks[] | select(.status == "failed")).status = "pending"' "$tasks_file" > "$tmp" && mv "$tmp" "$tasks_file" || rm -f "$tmp"
+}
+# ─────────────────────────────────────────────────────────────────────────────
+
+log "======================================================="
+log "=== PIPELINE: $PIPELINE_NAME ($STAGE_COUNT stages) ==="
+log "======================================================="
+log ""
+
+PRIOR_LOG_DIR=""
+PIPELINE_HALTED=false
+
+for (( s=0; s<STAGE_COUNT; s++ )); do
+    STAGE_NAME=$(jq -r ".stages[$s].name" "$PIPELINE_FILE")
+
+    # Check if this stage should be run based on filters
+    if ! should_run_stage "$STAGE_NAME"; then
+        log "=== STAGE $((s+1)): $STAGE_NAME -- SKIPPED (filtered out) ==="
+        update_pipeline_stage "$s" "skipped"
+        continue
+    fi
+
+    TASK_COUNT=$(jq ".stages[$s].tasks | length" "$PIPELINE_FILE")
+    PASS_OUTPUTS=$(jq -r ".stages[$s].pass_outputs_to_next // false" "$PIPELINE_FILE")
+    MAX_STAGE_RETRIES=$(jq -r ".stages[$s].max_stage_retries // 0" "$PIPELINE_FILE")
+    stage_attempt=1
+    max_stage_attempts=$((MAX_STAGE_RETRIES + 1))
+    stage_status=""
+
+    # Pre-compute filter IDs JSON once per stage (constant for the whole run)
+    FILTER_IDS_JSON="[]"
+    if [[ ${#FILTER_TASK_IDS[@]} -gt 0 ]]; then
+        FILTER_IDS_JSON=$(printf '%s\n' "${!FILTER_TASK_IDS[@]}" | jq -R . | jq -s .)
+    fi
+
+    while true; do
+        log "=== STAGE $((s+1)): $STAGE_NAME ($TASK_COUNT task files, attempt $stage_attempt/$max_stage_attempts) ==="
+
+        PIDS=()
+        FILES=()
+        CURRENT_STAGE_RUN_IDS=()
+
+        # Mark stage as running in pipeline state
+        update_pipeline_stage "$s" "running"
+        update_pipeline_stage_attempt "$s" "$stage_attempt"
+
+        for (( t=0; t<TASK_COUNT; t++ )); do
+            FILE=$(jq -r ".stages[$s].tasks[$t].file" "$PIPELINE_FILE")
+            MAX_P=$(jq -r ".stages[$s].tasks[$t].max_parallel // 5" "$PIPELINE_FILE")
+
+            if [[ ! -f "$FILE" ]]; then
+                log "WARNING: Task file not found: $FILE -- skipping"
+                continue
+            fi
+
+            # Apply task ID filter if --filter-tasks was specified
+            WORK_FILE="$FILE"
+            if [[ ${#FILTER_TASK_IDS[@]} -gt 0 ]]; then
+                FILTERED_FILE="$LOGS_BASE/filtered-stage-${s}-${t}.json"
+                _PIPELINE_TMPFILES+=("$FILTERED_FILE")
+                jq --argjson ids "$FILTER_IDS_JSON" \
+                    '.tasks = [.tasks[] | select(.id | IN($ids[]))]' \
+                    "$FILE" > "$FILTERED_FILE"
+                FILTERED_COUNT=$(jq '.tasks | length' "$FILTERED_FILE")
+                if [[ "$FILTERED_COUNT" -eq 0 ]]; then
+                    log "  (task file $FILE: 0 tasks match filter -- skipping)"
+                    continue
+                fi
+                log "  Filtered $FILE: $FILTERED_COUNT task(s) match filter -> $FILTERED_FILE"
+                WORK_FILE="$FILTERED_FILE"
+            fi
+
+            # Inject prior stage outputs if available (work on a copy to avoid permanent mutation)
+            if [[ -n "$PRIOR_LOG_DIR" && "$s" -gt 0 ]]; then
+                local_pass=$(jq -r ".stages[$((s-1))].pass_outputs_to_next // false" "$PIPELINE_FILE")
+                if [[ "$local_pass" == "true" ]]; then
+                    if [[ "$WORK_FILE" == "$FILE" ]]; then
+                        # No filter applied yet, make a copy
+                        WORK_FILE=$(mktemp --suffix=.json)
+                        _PIPELINE_TMPFILES+=("$WORK_FILE")
+                        cp "$FILE" "$WORK_FILE"
+                    fi
+                    inject_prior_outputs "$WORK_FILE" "$PRIOR_LOG_DIR"
+                fi
+            fi
+
+            # Assign deterministic run ID using pipeline name + stage name
+            STAGE_NAME_SLUG=$(echo "$STAGE_NAME" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/-/g' | sed 's/-\+/-/g' | sed 's/^-\|-$//g' | cut -c1-20)
+            STAGE_RUN_ID="${PIPELINE_ID}-${STAGE_NAME_SLUG}"
+            CURRENT_STAGE_RUN_IDS+=("$STAGE_RUN_ID")
+
+            FILES+=("$WORK_FILE")
+            log "Launching: $FILE (max_parallel=$MAX_P, run=${STAGE_RUN_ID})"
+            LOG_DIR="$LOGS_BASE/${STAGE_RUN_ID}" MAX_PARALLEL="$MAX_P" "$SCRIPT_DIR/orchestra" "$WORK_FILE" &
+            PIDS+=($!)
+        done
+
+        # If all task files were filtered out, skip this stage entirely
+        if [[ ${#FILES[@]} -eq 0 ]]; then
+            log "Skipping stage $((s+1)) ($STAGE_NAME) (no matching tasks)"
+            update_pipeline_stage "$s" "skipped"
+            stage_status="skipped"
+            break
+        fi
+
+        # Wait for all orchestrators in this stage
+        wait_for_batches "STAGE $((s+1)): $STAGE_NAME" "${FILES[@]}"
+
+        # Reap orchestrator processes
+        for pid in "${PIDS[@]}"; do
+            wait "$pid" 2>/dev/null || true
+        done
+
+        # Determine stage outcome
+        stage_status="done"
+        for f in "${FILES[@]}"; do
+            if [[ -f "$f" ]] && [[ $(jq '[.tasks[] | select(.status == "failed")] | length' "$f") -gt 0 ]]; then
+                stage_status="failed"
+                break
+            fi
+        done
+
+        if [[ "$stage_status" == "failed" && $stage_attempt -lt $max_stage_attempts ]]; then
+            # Stage retry: reset failed tasks and re-run
+            log "↻ Retrying stage '$STAGE_NAME' (attempt $((stage_attempt+1))/$max_stage_attempts)"
+            for f in "${FILES[@]}"; do
+                [[ -f "$f" ]] && reset_failed_tasks "$f"
+            done
+            stage_attempt=$((stage_attempt + 1))
+            continue
+        fi
+
+        # Stage complete (passed or retries exhausted)
+        update_pipeline_stage "$s" "$stage_status" "${CURRENT_STAGE_RUN_IDS[@]}"
+        update_pipeline_stage_attempt "$s" "$stage_attempt"
+        break
+    done
+
+    # Handle stage failure: halt or continue
+    if [[ "$stage_status" == "failed" ]]; then
+        if [[ "$HALT_ON_FAILURE" == "true" ]]; then
+            log "HALTED: Stage '$STAGE_NAME' failed. Pipeline stopped."
+            update_pipeline_halted "$s"
+
+            # Mark remaining stages as skipped
+            for (( rs=s+1; rs<STAGE_COUNT; rs++ )); do
+                update_pipeline_stage "$rs" "skipped"
+            done
+
+            PIPELINE_HALTED=true
+            break
+        else
+            log "WARNING: Stage '$STAGE_NAME' failed but halt_on_stage_failure=false, continuing..."
+        fi
+    fi
+
+    # Set PRIOR_LOG_DIR using explicit path (more reliable than find_log_dir_for_file)
+    if [[ ${#CURRENT_STAGE_RUN_IDS[@]} -gt 0 ]]; then
+        PRIOR_LOG_DIR="$LOGS_BASE/${CURRENT_STAGE_RUN_IDS[0]}"
+    fi
+
+    log ""
+done
+
+# Final summary
+if [[ "$PIPELINE_HALTED" == "true" ]]; then
+    log "======================================================="
+    log "=== PIPELINE HALTED: $PIPELINE_NAME ==="
+    log "======================================================="
+else
+    log "======================================================="
+    log "=== PIPELINE COMPLETE: $PIPELINE_NAME ==="
+    log "======================================================="
+fi
+log ""
+
+grand_done=0
+grand_failed=0
+grand_total=0
+grand_retried=0
+grand_verify_passed=0
+grand_verify_failed=0
+grand_verify_skipped=0
+stages_retried=0
+
+for (( s=0; s<STAGE_COUNT; s++ )); do
+    local_stage_status=$(jq -r ".stages[$s].status" "$PIPELINE_STATE_FILE")
+    local_stage_attempt=$(jq -r ".stages[$s].stage_attempt // 1" "$PIPELINE_STATE_FILE")
+    local_max_stage_attempts=$(jq -r ".stages[$s].max_stage_attempts // 1" "$PIPELINE_STATE_FILE")
+    local_stage_name=$(jq -r ".stages[$s].name" "$PIPELINE_STATE_FILE")
+
+    if [[ "$local_stage_status" == "skipped" ]]; then
+        log "  Stage $((s+1)) ($local_stage_name): SKIPPED"
+        continue
+    fi
+
+    if [[ $local_stage_attempt -gt 1 ]]; then
+        stages_retried=$((stages_retried + 1))
+    fi
+
+    TASK_COUNT=$(jq ".stages[$s].tasks | length" "$PIPELINE_FILE")
+    for (( t=0; t<TASK_COUNT; t++ )); do
+        FILE=$(jq -r ".stages[$s].tasks[$t].file" "$PIPELINE_FILE")
+        [[ ! -f "$FILE" ]] && continue
+        done_count=$(jq '[.tasks[] | select(.status == "done")] | length' "$FILE")
+        fail_count=$(jq '[.tasks[] | select(.status == "failed")] | length' "$FILE")
+        total=$(jq '.tasks | length' "$FILE")
+        retried=$(jq '[.tasks[] | select((.attempt // 1) > 1)] | length' "$FILE")
+        vp=$(jq '[.tasks[] | select(.verify_status == "passed")] | length' "$FILE")
+        vf=$(jq '[.tasks[] | select(.verify_status == "failed")] | length' "$FILE")
+        vs=$(jq '[.tasks[] | select((.verify_status // "skipped") == "skipped")] | length' "$FILE")
+        grand_done=$((grand_done + done_count))
+        grand_failed=$((grand_failed + fail_count))
+        grand_total=$((grand_total + total))
+        grand_retried=$((grand_retried + retried))
+        grand_verify_passed=$((grand_verify_passed + vp))
+        grand_verify_failed=$((grand_verify_failed + vf))
+        grand_verify_skipped=$((grand_verify_skipped + vs))
+        local retry_note=""
+        if [[ $local_stage_attempt -gt 1 ]]; then
+            retry_note=" (stage attempt $local_stage_attempt/$local_max_stage_attempts)"
+        fi
+        log "  $FILE: $done_count/$total done, $fail_count failed${retry_note}"
+    done
+done
+
+log ""
+log "GRAND TOTAL: $grand_done/$grand_total done, $grand_failed failed"
+if [[ $grand_retried -gt 0 ]]; then
+    log "RETRIED: $grand_retried task(s)"
+fi
+if [[ $stages_retried -gt 0 ]]; then
+    log "STAGE RETRIES: $stages_retried stage(s) required retry"
+fi
+if [[ $((grand_verify_passed + grand_verify_failed)) -gt 0 ]]; then
+    log "VERIFICATION: $grand_verify_passed passed, $grand_verify_failed failed, $grand_verify_skipped skipped"
+fi
+if [[ "$PIPELINE_HALTED" == "true" ]]; then
+    halted_idx=$(jq -r '.halted_at_stage // "?"' "$PIPELINE_STATE_FILE")
+    halted_name=$(jq -r ".stages[$halted_idx].name // \"?\"" "$PIPELINE_STATE_FILE")
+    log "HALTED AT: Stage $((halted_idx + 1)) ($halted_name)"
+fi
+
+# Auto-aggregate if enabled
+if [[ "$AGGREGATE" == "true" && -n "$PRIOR_LOG_DIR" ]]; then
+    log ""
+    log "Generating aggregate report..."
+    "$SCRIPT_DIR/orchestra-report" "$PRIOR_LOG_DIR"
+fi

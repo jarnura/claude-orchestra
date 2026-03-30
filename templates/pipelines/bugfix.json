@@ -1,0 +1,37 @@
+{
+  "name": "Bugfix Pipeline",
+  "halt_on_stage_failure": true,
+  "stages": [
+    {
+      "name": "Diagnose",
+      "tasks": [
+        {
+          "file": "tasks-diagnose.json",
+          "max_parallel": 1
+        }
+      ],
+      "pass_outputs_to_next": true
+    },
+    {
+      "name": "Fix",
+      "tasks": [
+        {
+          "file": "tasks-fix.json",
+          "max_parallel": 3
+        }
+      ],
+      "pass_outputs_to_next": true
+    },
+    {
+      "name": "Verify",
+      "tasks": [
+        {
+          "file": "tasks-verify.json",
+          "max_parallel": 3
+        }
+      ],
+      "pass_outputs_to_next": false
+    }
+  ],
+  "aggregate": true
+}
