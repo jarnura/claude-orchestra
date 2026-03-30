@@ -4094,14 +4094,27 @@ CRITICAL: All task workdir fields MUST be "{repo_path}". Generate a realistic mu
                 self._error(404, err)
                 return
 
-            # Validate task_id exists in the tasks file
-            tasks_data, terr = _load_tasks_file(Path(mapping["tasks_file"]))
-            if terr:
-                self._error(500, f"Cannot read tasks file: {terr}")
+            # Validate task_id exists in any of the tasks files
+            # Check tasks_files array first (multi-file support), fall back to single tasks_file
+            tasks_files = mapping.get("tasks_files") or [mapping.get("tasks_file")]
+            if not tasks_files or not any(tasks_files):
+                self._error(500, "No tasks file configured in mapping")
                 return
-            task_ids = {t.get("id") for t in tasks_data["tasks"]}
-            if task_id not in task_ids:
-                self._error(404, f"Task '{task_id}' not found in tasks file")
+
+            task_found = False
+            for tf in tasks_files:
+                if not tf:
+                    continue
+                tasks_data, terr = _load_tasks_file(Path(tf))
+                if terr:
+                    continue  # Try next file
+                task_ids = {t.get("id") for t in tasks_data.get("tasks", [])}
+                if task_id in task_ids:
+                    task_found = True
+                    break
+
+            if not task_found:
+                self._error(404, f"Task '{task_id}' not found in any tasks file")
                 return
 
             # Validate stage_index exists in template
